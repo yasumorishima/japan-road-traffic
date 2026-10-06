@@ -20,7 +20,7 @@ Every day is stored as release assets in the release `raw-YYYYMM` (JST month):
 | `loop_1h_road3_YYYYMMDD.csv.gz` | hourly, permanent counters, national highways (一般国道) |
 | `cctv_1h_road3_YYYYMMDD.csv.gz` | hourly, AI counters on CCTV images, national highways |
 | `loop_1h_road1_…` / `cctv_1h_road1_…` | hourly, expressways (高速自動車国道) with MLIT counters |
-| `loop_5m_road3_…` / `cctv_5m_road3_…` / `…_road1_…` | 5-minute, Kanto box |
+| `loop_5m_road3_…` / `cctv_5m_road3_…` / `loop_5m_road1_…` | 5-minute, Kanto box (there are no CCTV counters on expressways in this box, so there is no `cctv_5m_road1`) |
 
 Columns are the source's own names (Japanese), plus longitude and latitude:
 
@@ -44,7 +44,7 @@ Columns are the source's own names (Japanese), plus longitude and latitude:
 
 ## How it is collected
 
-`.github/workflows/collect.yml` runs three times a day. `scripts/collect.py` lists the days the source still holds but the releases do not have, fetches them one request at a time with a pause between requests, and uploads a file only when every time code of the day is present (24 hourly or 288 five-minute codes). A missed run is recovered by the next one while the day is still in the source window. A day that stays incomplete (an outage at the source) is kept as it is only when it is about to leave the source window; the run log lists those days.
+`.github/workflows/collect.yml` runs three times a day. `scripts/collect.py` lists the days the source still holds but the releases do not have, fetches them one request at a time with a pause between requests, and uploads a file when every time code of the day is present (24 hourly or 288 five-minute codes). The source itself lacks a few time codes on many days (for example 287 of 288 five-minute codes; asking again returns nothing), so a day older than yesterday with at most 5% of its codes missing is uploaded as it is. A day with a larger gap is retried and kept as it is only when it is about to leave the source window. A missing time code means the source has no value for it. A missed run is recovered by the next one while the day is still in the source window.
 
 ## Source and terms
 

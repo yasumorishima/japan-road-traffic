@@ -4,8 +4,9 @@ and upload it as a release asset (release `raw-YYYYMM`, one gzip CSV per layer /
 The source keeps 5-minute values for about one month and hourly values for about three months, so a
 missed run is recovered by the next one as long as it comes within that window.
 
-A file is uploaded only when every time code of the day is present (24 hourly or 288 five-minute codes).
-A day that stays incomplete is retried on later runs and uploaded as it is only when it is about to leave
+A file is uploaded when every time code of the day is present (24 hourly or 288 five-minute codes), or,
+from the day before yesterday back, when at most 5% of the codes are missing: the source itself lacks a few
+codes on many days and re-querying does not bring them back. A day with a larger gap is retried on later runs and uploaded as it is only when it is about to leave
 the source window, and then only if the day's reference layer (permanent counters on national highways)
 shows the source still holds that day."""
 import argparse, json, os, subprocess, sys, tempfile
@@ -23,6 +24,9 @@ LAYERS = [
     ("1h", "t_travospublic_measure_1h_img", "cctv_1h", fetch.JAPAN, 60, 4, 88),
 ]
 ROADS = (3, 1)
+# Combinations with no counters: CCTV counters on expressways inside the Kanto box returned 0 rows on every
+# day of 2026-09-05..10-05. Fetching them would only keep those days open forever.
+SKIP = {("cctv_5m", 1)}
 REFERENCE = {"5m": ("loop_5m", 3), "1h": ("loop_1h", 3)}
 NEAR_EXPIRY = 3          # days before the end of the source window when an incomplete day is kept as it is
 MAX_CONSECUTIVE_FAILS = 3  # stop the run when the source keeps failing instead of burning the job time
@@ -80,7 +84,7 @@ def main():
     now = datetime.now(JST)
     # yesterday is complete once hourly values for 23:00 are out (about 85 minutes after the hour)
     last = (now - timedelta(days=1)).date() if now.hour >= 3 else (now - timedelta(days=2)).date()
-    cache, failed, partial, consecutive = {}, [], [], 0
+    cache, failed, gaps, consecutive = {}, [], [], 0
     for kind in ("5m", "1h"):
         layers = [l for l in LAYERS if l[0] == kind]
         keep = layers[0][6]
@@ -91,7 +95,8 @@ def main():
             day = d.strftime("%Y%m%d"); tag = f"raw-{day[:6]}"
             have = (release_assets(tag) or set()) if a.dry_run else ensure_release(tag, cache)
             # reference layer first: its result decides whether an incomplete day of another layer may be kept
-            missing = sorted(((l, r) for l in layers for r in ROADS if asset_name(l[2], r, day) not in have),
+            missing = sorted(((l, r) for l in layers for r in ROADS
+                              if (l[2], r) not in SKIP and asset_name(l[2], r, day) not in have),
                              key=lambda m: (m[0][2], m[1]) != ref)
             if missing:
                 todo.append((d, day, tag, missing, asset_name(*ref, day) in have))
@@ -118,11 +123,13 @@ def main():
                         continue
                     present = {str(r[0]) for r in rows}
                     is_ref = (short, road) == ref
-                    complete = present >= expected
-                    if is_ref and complete:
+                    lacking = len(expected - present)
+                    # The source itself lacks a few codes on many days (e.g. 287 of 288, measured 2026-09;
+                    # re-querying returns nothing), so a day older than yesterday with a small gap is settled.
+                    settled = lacking == 0 or ((last - d).days >= 1 and lacking <= max(1, len(expected) // 20))
+                    if is_ref and settled:
                         ref_ok = True
-                    if not complete:
-                        lacking = len(expected - present)
+                    if not settled:
                         if not near_expiry:
                             print(f"  {short} road{road} {day}: {lacking}/{len(expected)} time codes missing, retry later")
                             continue
@@ -130,15 +137,16 @@ def main():
                         if not (rows if is_ref else ref_ok):
                             print(f"  {short} road{road} {day}: not kept ({lacking} codes missing and the reference layer shows the day is gone)")
                             continue
-                        partial.append(f"{short}_road{road}_{day} ({lacking} of {len(expected)} codes missing)")
+                    if lacking:
+                        gaps.append(f"{short}_road{road}_{day} ({lacking} of {len(expected)} codes missing)")
                     path = os.path.join(tmp, asset_name(short, road, day))
                     fetch.write_csv(path, rows)
                     if upload(tag, path, cache):
                         print(f"  {short} road{road} {day}: {len(rows)} rows, {len(present)} codes", flush=True)
                     else:
                         failed.append(f"{short}_road{road}_{day}")
-    if partial:
-        print("::warning::kept incomplete near the end of the source window: " + "; ".join(partial))
+    if gaps:
+        print(f"uploaded with time codes the source does not have: {len(gaps)} file(s): " + "; ".join(gaps[:20]))
     if failed:
         print(f"::error::{len(failed)} file(s) failed: {failed[:10]}")
         sys.exit(1)

@@ -52,19 +52,20 @@ names = lambda rel: set().union(*rel.values()) if rel else set()
 # 1. everything complete: every layer/road/day of both windows is uploaded
 code, rel, out = run(full)
 assert code == 0, out
-assert len(names(rel)) == 2 * 2 * 28 + 2 * 2 * 88, len(names(rel))
+assert len(names(rel)) == 3 * 28 + 2 * 2 * 88, len(names(rel))
 
 # 2. a recent day missing one hour is not uploaded (retried later); an old one near expiry is kept
 def gap(layer, road, day):
     s = full(layer, road, day)
-    if day in (D(1), D(87)) and "1h_img" in layer:
-        s = {c for c in s if not c.endswith("0500")}
+    if day in (D(0), D(5), D(87)) and "1h_img" in layer:
+        s = {c for c in s if c[8:10] not in ("05", "06", "07")}  # 3 of 24 hours: more than the settled gap
     return s
 code, rel, out = run(gap)
 assert code == 0, out
-assert f"cctv_1h_road3_{D(1)}.csv.gz" not in names(rel), "partial recent day must wait"
+assert f"cctv_1h_road3_{D(0)}.csv.gz" not in names(rel), "yesterday with a gap must wait"
 assert f"cctv_1h_road3_{D(87)}.csv.gz" in names(rel), "partial day near expiry is kept"
-assert "kept incomplete" in out
+assert f"cctv_1h_road3_{D(5)}.csv.gz" not in names(rel), "a large gap away from expiry waits"
+assert f"cctv_1h_road3_{D(86)}.csv.gz" in names(rel) and "codes the source does not have" in out
 
 # 3. day already gone from the source (reference layer empty): nothing of that day is uploaded
 def gone(layer, road, day):
@@ -72,11 +73,18 @@ def gone(layer, road, day):
 code, rel, out = run(gone)
 assert not any(D(87) in n and "_1h_" in n for n in names(rel)), sorted(n for n in names(rel) if D(87) in n)
 
-# 4. a legitimately empty layer (no CCTV counters on expressways in Kanto) waits, then is kept near expiry
-def empty_layer(layer, road, day):
-    return set() if (layer.endswith("5m_img") and road == 1) else full(layer, road, day)
-code, rel, out = run(empty_layer)
-assert f"cctv_5m_road1_{D(27)}.csv.gz" in names(rel) and f"cctv_5m_road1_{D(1)}.csv.gz" not in names(rel)
+# 4. the combination without counters is never fetched; a settled day with a small source gap is uploaded,
+#    yesterday with the same gap waits
+seen = []
+def small_gap(layer, road, day):
+    seen.append((layer, road))
+    s = full(layer, road, day)
+    return {c for c in s if not c.endswith("1145")} if day in (D(0), D(1)) and layer.endswith("_5m") else s
+code, rel, out = run(small_gap)
+assert ("t_travospublic_measure_5m_img", 1) not in seen
+assert not any(n.startswith("cctv_5m_road1") for n in names(rel))
+assert f"loop_5m_road3_{D(1)}.csv.gz" in names(rel) and f"loop_5m_road3_{D(0)}.csv.gz" not in names(rel)
+assert "codes the source does not have" in out
 
 # 5. an upload that errors because the asset is already there is not a failure
 code, rel, out = run(full, upload_fails={f"loop_1h_road3_{D(3)}.csv.gz"})
