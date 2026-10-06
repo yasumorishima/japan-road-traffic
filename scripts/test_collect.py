@@ -4,8 +4,9 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(__file__))
 import fetch, collect
 
-def run(source, releases=None, upload_fails=(), max_days=100):
-    """source(layer, road, day) -> set of time codes present (or 'fail'). Returns (exit code, releases, stdout)."""
+def run(source, releases=None, upload_fails=(), upload_broken=(), max_days=100):
+    """source(layer, road, day) -> set of time codes present, or {code: counters}, or 'fail'.
+    Returns (exit code, releases, stdout)."""
     releases = releases if releases is not None else {}
     out = []
     def release_assets(tag):
@@ -18,14 +19,18 @@ def run(source, releases=None, upload_fails=(), max_days=100):
             if name in upload_fails:
                 releases[args[2]].add(name)  # the asset got there although the call failed
                 return types.SimpleNamespace(returncode=1, stderr="already exists")
+            if name in upload_broken:
+                return types.SimpleNamespace(returncode=1, stderr="HTTP 502")
             releases[args[2]].add(name); return types.SimpleNamespace(returncode=0, stderr="")
         raise AssertionError(args)
     def get(layer, road, t0, t1, bbox):
         got = source(layer, road, t0[:8])
         if got == "fail":
             raise RuntimeError("down")
-        return [{"properties": {"時間コード": int(c), "常時観測点コード": 1}, "geometry": {"coordinates": [[139.0, 35.0]]}}
-                for c in sorted(got) if t0 <= c <= t1]
+        if not isinstance(got, dict):
+            got = {c: 1 for c in got}
+        return [{"properties": {"時間コード": int(c), "常時観測点コード": i}, "geometry": {"coordinates": [[139.0, 35.0]]}}
+                for c in sorted(got) if t0 <= c <= t1 for i in range(got[c])]
     collect.release_assets, collect.gh = release_assets, gh
     fetch.get = get
     sys.argv = ["collect.py", "--max-days", str(max_days)]
@@ -67,11 +72,15 @@ assert f"cctv_1h_road3_{D(87)}.csv.gz" in names(rel), "partial day near expiry i
 assert f"cctv_1h_road3_{D(5)}.csv.gz" not in names(rel), "a large gap away from expiry waits"
 assert f"cctv_1h_road3_{D(86)}.csv.gz" in names(rel) and "codes the source does not have" in out
 
-# 3. day already gone from the source (reference layer empty): nothing of that day is uploaded
+# 3. day already gone from the source: no empty file is uploaded, also when another layer of that day
+#    was archived before the source dropped it
 def gone(layer, road, day):
     return set() if day == D(87) else full(layer, road, day)
 code, rel, out = run(gone)
 assert not any(D(87) in n and "_1h_" in n for n in names(rel)), sorted(n for n in names(rel) if D(87) in n)
+tag87 = f"raw-{D(87)[:6]}"
+code, rel, out = run(gone, releases={tag87: {f"loop_1h_road3_{D(87)}.csv.gz"}})
+assert f"cctv_1h_road3_{D(87)}.csv.gz" not in names(rel) and "no rows" in out, out[-500:]
 
 # 4. the combination without counters is never fetched; a settled day with a small source gap is uploaded,
 #    yesterday with the same gap waits
@@ -105,5 +114,33 @@ code, rel, out = run(count, releases=rel_done if (rel_done := run(full)[1]) else
 assert code == 0 and fetched == [], fetched[:3]
 fetched.clear()
 code, rel, out = run(count, max_days=2)
-assert len(set(fetched)) == 4, sorted(set(fetched))  # 2 days per kind
+# with the cap, the days about to leave the source come first (oldest first), then the newest days
+assert set(fetched) == {D(27), D(26), D(87), D(86)}, sorted(set(fetched))
+fetched.clear()
+code, rel, out = run(count, max_days=5)
+assert set(fetched) == {D(27), D(26), D(25), D(0), D(1), D(87), D(86), D(85)}, sorted(set(fetched))
+
+# 8. the 5% boundary on a settled day: 14 of 288 missing is uploaded, 15 waits
+def boundary(layer, road, day):
+    s = sorted(full(layer, road, day))
+    if layer.endswith("measure_5m") and road == 3 and day == D(3):
+        return set(s[14:])
+    if layer.endswith("measure_5m") and road == 3 and day == D(4):
+        return set(s[15:])
+    return set(s)
+code, rel, out = run(boundary)
+assert f"loop_5m_road3_{D(3)}.csv.gz" in names(rel) and f"loop_5m_road3_{D(4)}.csv.gz" not in names(rel)
+
+# 9. a code with far fewer counters than the rest (a cut response) counts as missing
+def thin(layer, road, day):
+    s = {c: 10 for c in full(layer, road, day)}
+    if layer.endswith("measure_1h") and road == 3 and day == D(0):
+        s[min(s)] = 3
+    return s
+code, rel, out = run(thin)
+assert f"loop_1h_road3_{D(0)}.csv.gz" not in names(rel) and f"loop_1h_road3_{D(1)}.csv.gz" in names(rel)
+
+# 10. an upload that really fails makes the run fail
+code, rel, out = run(full, upload_broken={f"loop_1h_road3_{D(2)}.csv.gz"})
+assert code == 1 and f"loop_1h_road3_{D(2)}" in out
 print("test_collect: ALL PASS")

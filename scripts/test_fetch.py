@@ -29,4 +29,17 @@ try:
     raise AssertionError("expected RuntimeError")
 except RuntimeError:
     pass
+# the real get(): a response whose numberMatched exceeds numberReturned is treated like an oversized one
+import importlib, io, json as _json
+real = importlib.reload(fetch)
+real.PAUSE = 0
+def fake_urlopen(url, timeout=0):
+    body = {"features": [{"properties": {}}], "numberMatched": 5, "numberReturned": 1}
+    if "202610050005" in urllib_unquote(url):
+        body = {"features": [{"properties": {}}], "numberMatched": 1, "numberReturned": 1}
+    return io.BytesIO(_json.dumps(body).encode())
+from urllib.parse import unquote as urllib_unquote
+real.urllib.request.urlopen = fake_urlopen
+assert real.get("x", 3, "202610050000", "202610050000", real.KANTO) is None
+assert real.get("x", 3, "202610050005", "202610050005", real.KANTO) == [{"properties": {}}]
 print("test_fetch: ALL PASS")

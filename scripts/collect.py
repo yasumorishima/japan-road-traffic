@@ -7,8 +7,7 @@ missed run is recovered by the next one as long as it comes within that window.
 A file is uploaded when every time code of the day is present (24 hourly or 288 five-minute codes), or,
 from the day before yesterday back, when at most 5% of the codes are missing: the source itself lacks a few
 codes on many days and re-querying does not bring them back. A day with a larger gap is retried on later runs and uploaded as it is only when it is about to leave
-the source window, and then only if the day's reference layer (permanent counters on national highways)
-shows the source still holds that day."""
+the source window, and then only if it has rows."""
 import argparse, json, os, subprocess, sys, tempfile
 from datetime import datetime, timedelta, timezone
 
@@ -27,7 +26,6 @@ ROADS = (3, 1)
 # Combinations with no counters: CCTV counters on expressways inside the Kanto box returned 0 rows on every
 # day of 2026-09-05..10-05. Fetching them would only keep those days open forever.
 SKIP = {("cctv_5m", 1)}
-REFERENCE = {"5m": ("loop_5m", 3), "1h": ("loop_1h", 3)}
 NEAR_EXPIRY = 3          # days before the end of the source window when an incomplete day is kept as it is
 MAX_CONSECUTIVE_FAILS = 3  # stop the run when the source keeps failing instead of burning the job time
 REPO = os.environ.get("GITHUB_REPOSITORY", "yasumorishima/japan-road-traffic")
@@ -88,20 +86,21 @@ def main():
     for kind in ("5m", "1h"):
         layers = [l for l in LAYERS if l[0] == kind]
         keep = layers[0][6]
-        ref = REFERENCE[kind]
         days = sorted(last - timedelta(days=i) for i in range(keep))
         todo = []
         for d in days:
             day = d.strftime("%Y%m%d"); tag = f"raw-{day[:6]}"
             have = (release_assets(tag) or set()) if a.dry_run else ensure_release(tag, cache)
-            # reference layer first: its result decides whether an incomplete day of another layer may be kept
-            missing = sorted(((l, r) for l in layers for r in ROADS
-                              if (l[2], r) not in SKIP and asset_name(l[2], r, day) not in have),
-                             key=lambda m: (m[0][2], m[1]) != ref)
+            missing = [(l, r) for l in layers for r in ROADS
+                       if (l[2], r) not in SKIP and asset_name(l[2], r, day) not in have]
             if missing:
-                todo.append((d, day, tag, missing, asset_name(*ref, day) in have))
+                todo.append((d, day, tag, missing))
         print(f"{kind}: {len(todo)} day(s) missing in {days[0]}..{days[-1]}", flush=True)
-        for d, day, tag, missing, ref_ok in todo[:a.max_days]:  # oldest first: the source drops those next
+        # Days about to leave the source go first (oldest first), then the newest. Oldest-first throughout
+        # would let days that stay unsettled hold the cap and keep newer days from being fetched.
+        expiring = [t for t in todo if (last - t[0]).days >= keep - NEAR_EXPIRY]
+        rest = sorted((t for t in todo if t not in expiring), key=lambda t: t[0], reverse=True)
+        for d, day, tag, missing in (expiring + rest)[:a.max_days]:
             if a.dry_run:
                 print(f"  would fetch {day}: {[m[0][2] + '_road' + str(m[1]) for m in missing]}"); continue
             near_expiry = (last - d).days >= keep - NEAR_EXPIRY
@@ -121,21 +120,23 @@ def main():
                             print(f"::error::{consecutive} files in a row failed; the source looks down, stopping")
                             sys.exit(1)
                         continue
-                    present = {str(r[0]) for r in rows}
-                    is_ref = (short, road) == ref
+                    per = {}
+                    for r in rows:
+                        per[str(r[0])] = per.get(str(r[0]), 0) + 1
+                    # A code with far fewer counters than the day's median counts as missing (a cut response).
+                    med = sorted(per.values())[len(per) // 2] if per else 0
+                    present = {c for c, k in per.items() if k >= 0.8 * med}
                     lacking = len(expected - present)
                     # The source itself lacks a few codes on many days (e.g. 287 of 288, measured 2026-09;
                     # re-querying returns nothing), so a day older than yesterday with a small gap is settled.
                     settled = lacking == 0 or ((last - d).days >= 1 and lacking <= max(1, len(expected) // 20))
-                    if is_ref and settled:
-                        ref_ok = True
                     if not settled:
                         if not near_expiry:
                             print(f"  {short} road{road} {day}: {lacking}/{len(expected)} time codes missing, retry later")
                             continue
-                        # keep an incomplete day only when the source still holds that day
-                        if not (rows if is_ref else ref_ok):
-                            print(f"  {short} road{road} {day}: not kept ({lacking} codes missing and the reference layer shows the day is gone)")
+                        # about to leave the source: keep what is there, but never an empty file
+                        if not rows:
+                            print(f"  {short} road{road} {day}: not kept (no rows; the source no longer has this day)")
                             continue
                     if lacking:
                         gaps.append(f"{short}_road{road}_{day} ({lacking} of {len(expected)} codes missing)")
