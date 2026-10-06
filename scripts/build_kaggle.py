@@ -108,7 +108,7 @@ def main():
             sys.exit(f"{res} {month}: {dup} duplicated (time, counter, sensor) rows")
         unknown |= set(df[["counter_id", "sensor"]].drop_duplicates().itertuples(index=False, name=None)) - known
         name = ("hourly" if res == "1h" else "five_minute_kanto") + f"_{month}.parquet"
-        df.to_parquet(os.path.join(a.out, name), index=False, compression="zstd")
+        df.to_parquet(os.path.join(a.out, name), index=False, compression="zstd", row_group_size=50_000)
         print(f"{name}: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)
     if unknown:
         sys.exit(f"{len(unknown)} counters are not in {a.counters} (rebuild it with --from-files): {sorted(unknown)[:10]}")
