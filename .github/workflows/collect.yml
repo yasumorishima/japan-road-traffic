@@ -1,0 +1,60 @@
+name: Collect traffic volume
+
+on:
+  schedule:
+    # 03:17 JST, then two backup slots: GitHub sometimes does not deliver a scheduled run.
+    # Extra runs only fetch days still missing from the releases, so they cost nothing when all is in.
+    - cron: '17 18 * * *'
+    - cron: '47 1 * * *'
+    - cron: '23 9 * * *'
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: 'Why this run'
+        required: true
+        type: string
+      max_days:
+        description: 'Days per kind to fetch in this run'
+        required: false
+        default: '8'
+        type: string
+      dry_run:
+        description: 'Only list missing days'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test the fetcher and the collector (offline)
+        run: |
+          python scripts/test_fetch.py
+          python scripts/test_collect.py
+
+      - name: Fetch missing days and upload them to releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_DAYS: ${{ inputs.max_days || '8' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(--max-days "$MAX_DAYS")
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python scripts/collect.py "${args[@]}"
