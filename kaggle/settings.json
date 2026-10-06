@@ -1,0 +1,91 @@
+{
+  "id": "yasunorim/japan-road-traffic-volume",
+  "expectedUpdateFrequency": "daily",
+  "userSpecifiedSources": "MLIT Traffic Volume API (交通量API, reference values), data provided by the Japan Road Traffic Information Center (JARTIC, https://www.jartic-open-traffic.org/); place names from the GSI reverse geocoder (国土地理院). Collected three times a day and built by https://github.com/yasumorishima/japan-road-traffic, which uploads a day only when every check passes.",
+  "files": {
+    "counters.csv": {
+      "description": "One row per counter (ID and sensor) seen in the API or the archive: location, prefecture, municipality and town (GSI reverse geocoder), and the last day it reported.",
+      "columns": {
+        "counter_id": "Counter ID (常時観測点コード)",
+        "sensor": "loop = permanent counter, cctv = AI count on CCTV images; (counter_id, sensor) is the key",
+        "road_type": "1 = expressway, 3 = national highway",
+        "longitude": "Longitude, WGS84, as given by the source",
+        "latitude": "Latitude, WGS84, as given by the source",
+        "prefecture": "Prefecture at the location (Japanese), from the GSI reverse geocoder",
+        "municipality_code": "Five-digit local government code (全国地方公共団体コード without the check digit) with its leading zero (01337); read it as text, e.g. pandas dtype={'municipality_code': str}",
+        "municipality": "City, ward, town or village at the location (Japanese)",
+        "town": "Town or district name at the location (Japanese), from the GSI reverse geocoder; can be empty",
+        "in_5min_box": "True when the counter is inside the Kanto box that has five-minute data (longitude 138.4-140.95, latitude 34.85-37.2)",
+        "last_seen": "Latest day (JST) this counter reported in the API or in the archive"
+      }
+    },
+    "five_minute_kanto_2026-09.parquet": {
+      "description": "Five-minute vehicle counts for 2026-09 (JST) inside the Kanto box (Tokyo, Kanagawa, Saitama, Chiba, Ibaraki, Tochigi, Gunma and edges): permanent and CCTV counters. One row per five minutes, counter and sensor.",
+      "columns": {
+        "time_jst": "Start of the interval (the source's time code), Japan Standard Time (UTC+9), no time zone attached. Five-minute code 09:05 is 09:05-09:09 in the API specification",
+        "counter_id": "Counter ID (常時観測点コード). The same ID can exist as a permanent counter and as a CCTV counter: the key is (counter_id, sensor); join counters.csv on both",
+        "sensor": "loop = permanent counter (loop or ultrasonic detector), cctv = AI count on CCTV images",
+        "road_type": "1 = expressway (高速自動車国道) with an MLIT counter, 3 = national highway (一般国道)",
+        "regional_bureau": "Regional bureau number (地方整備局等番号): 81 Hokkaido, 82 Tohoku, 83 Kanto, 84 Hokuriku, 85 Chubu, 86 Kinki, 87 Chugoku, 88 Shikoku, 89 Kyushu, 90 Okinawa",
+        "sub_region": "Sub-region code (開発建設部／都道府県コード) as given by the source; empty outside Hokkaido and Chubu",
+        "up_total": "All vehicles in the interval, the 'up' direction (上り). CCTV counters only (the source gives it directly); empty for permanent counters, where it is up_small + up_large + up_unclassified",
+        "up_small": "Small vehicles in the interval, the 'up' direction (上り); empty when the source gives no value",
+        "up_large": "Large vehicles in the interval, the 'up' direction (上り); empty when the source gives no value",
+        "up_unclassified": "Vehicles whose size could not be told, the 'up' direction (上り)",
+        "down_total": "All vehicles in the interval, the 'down' direction (下り). CCTV counters only (the source gives it directly); empty for permanent counters, where it is down_small + down_large + down_unclassified",
+        "down_small": "Small vehicles in the interval, the 'down' direction (下り); empty when the source gives no value",
+        "down_large": "Large vehicles in the interval, the 'down' direction (下り); empty when the source gives no value",
+        "down_unclassified": "Vehicles whose size could not be told, the 'down' direction (下り)",
+        "up_power_failure": "Permanent counters: True when the source flags a power failure, the 'up' direction (上り); empty for CCTV",
+        "up_loop_fault": "Permanent counters: True when the source flags a loop detector fault, the 'up' direction (上り); empty for CCTV",
+        "up_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'up' direction (上り); empty for CCTV",
+        "up_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'up' direction (上り); empty for CCTV",
+        "down_power_failure": "Permanent counters: True when the source flags a power failure, the 'down' direction (下り); empty for CCTV",
+        "down_loop_fault": "Permanent counters: True when the source flags a loop detector fault, the 'down' direction (下り); empty for CCTV",
+        "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
+        "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
+        "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "cam_preset_position": "Five-minute CCTV rows only: True = camera is off its preset position (カメラプリセット位置); the source blanks the counts then, False = normal, empty = could not be judged or not a CCTV row",
+        "cam_weather_degraded": "Five-minute CCTV rows only: True = image degraded by weather (気象影響による映像不良), False = normal, empty = could not be judged or not a CCTV row",
+        "cam_low_light": "Five-minute CCTV rows only: True = not enough light (照度不足), False = normal, empty = could not be judged or not a CCTV row",
+        "cam_incident": "Five-minute CCTV rows only: True = incident such as a traffic accident (突発事象（交通事故等）), False = normal, empty = could not be judged or not a CCTV row",
+        "cam_server_status": "Five-minute CCTV rows only: True = server not running (サーバの稼働), False = normal, empty = could not be judged or not a CCTV row",
+        "cam_feed_status": "Five-minute CCTV rows only: True = video feed not received (カメラの映像受信), False = normal, empty = could not be judged or not a CCTV row",
+        "cam_decode_status": "Five-minute CCTV rows only: True = video decoding failed (映像のデコード処理), False = normal, empty = could not be judged or not a CCTV row",
+        "cam_import_failure": "Five-minute CCTV rows only: True = decoded video could not be passed to the analyser (取込加工処理の失敗), False = normal, empty = could not be judged or not a CCTV row",
+        "cam_analyzer_freeze": "Five-minute CCTV rows only: True = the image analyser froze (映像解析機能のフリーズ), False = normal, empty = could not be judged or not a CCTV row",
+        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row"
+      }
+    },
+    "hourly_2026-07.parquet": {
+      "description": "Hourly vehicle counts for 2026-07 (JST), nationwide: permanent and CCTV counters on national highways and the expressways that have MLIT counters. One row per hour, counter and sensor.",
+      "columns": {
+        "time_jst": "Start of the interval (the source's time code), Japan Standard Time (UTC+9), no time zone attached. Five-minute code 09:05 is 09:05-09:09 in the API specification",
+        "counter_id": "Counter ID (常時観測点コード). The same ID can exist as a permanent counter and as a CCTV counter: the key is (counter_id, sensor); join counters.csv on both",
+        "sensor": "loop = permanent counter (loop or ultrasonic detector), cctv = AI count on CCTV images",
+        "road_type": "1 = expressway (高速自動車国道) with an MLIT counter, 3 = national highway (一般国道)",
+        "regional_bureau": "Regional bureau number (地方整備局等番号): 81 Hokkaido, 82 Tohoku, 83 Kanto, 84 Hokuriku, 85 Chubu, 86 Kinki, 87 Chugoku, 88 Shikoku, 89 Kyushu, 90 Okinawa",
+        "sub_region": "Sub-region code (開発建設部／都道府県コード) as given by the source; empty outside Hokkaido and Chubu",
+        "up_total": "All vehicles in the interval, the 'up' direction (上り). CCTV counters only (the source gives it directly); empty for permanent counters, where it is up_small + up_large + up_unclassified",
+        "up_small": "Small vehicles in the interval, the 'up' direction (上り); empty when the source gives no value",
+        "up_large": "Large vehicles in the interval, the 'up' direction (上り); empty when the source gives no value",
+        "up_unclassified": "Vehicles whose size could not be told, the 'up' direction (上り)",
+        "down_total": "All vehicles in the interval, the 'down' direction (下り). CCTV counters only (the source gives it directly); empty for permanent counters, where it is down_small + down_large + down_unclassified",
+        "down_small": "Small vehicles in the interval, the 'down' direction (下り); empty when the source gives no value",
+        "down_large": "Large vehicles in the interval, the 'down' direction (下り); empty when the source gives no value",
+        "down_unclassified": "Vehicles whose size could not be told, the 'down' direction (下り)",
+        "up_power_failure": "Permanent counters: True when the source flags a power failure, the 'up' direction (上り); empty for CCTV",
+        "up_loop_fault": "Permanent counters: True when the source flags a loop detector fault, the 'up' direction (上り); empty for CCTV",
+        "up_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'up' direction (上り); empty for CCTV",
+        "up_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'up' direction (上り); empty for CCTV",
+        "down_power_failure": "Permanent counters: True when the source flags a power failure, the 'down' direction (下り); empty for CCTV",
+        "down_loop_fault": "Permanent counters: True when the source flags a loop detector fault, the 'down' direction (下り); empty for CCTV",
+        "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
+        "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
+        "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+      }
+    }
+  }
+}
