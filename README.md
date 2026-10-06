@@ -22,7 +22,8 @@ Every day is stored as release assets in the release `raw-YYYYMM` (JST month):
 | `loop_1h_road1_…` / `cctv_1h_road1_…` | hourly, expressways (高速自動車国道) with MLIT counters |
 | `loop_5m_road3_…` / `cctv_5m_road3_…` / `loop_5m_road1_…` | 5-minute, Kanto box (there are no CCTV counters on expressways in this box, so there is no `cctv_5m_road1`) |
 
-Columns are the source's own names (Japanese), plus longitude and latitude:
+Columns are the source's own names (Japanese), plus longitude and latitude. Each layer has its own field names
+(`scripts/fetch.py` holds the three lists); all of them start with:
 
 | column | meaning |
 |---|---|
@@ -31,16 +32,21 @@ Columns are the source's own names (Japanese), plus longitude and latitude:
 | 道路種別 | 1 = expressway, 3 = national highway |
 | 地方整備局等番号 | regional bureau (81 Hokkaido … 90 Okinawa) |
 | 開発建設部／都道府県コード | sub-region (Hokkaido and Chubu only) |
-| 上り・小型交通量 / 上り・大型交通量 / 上り・車種判別不能交通量 | vehicles in the interval, "up" direction: small / large / unclassified |
-| 上り・停電 / 上り・ループ異常 / 上り・超音波異常 / 上り・欠測 | flags (1 = power failure / loop fault / ultrasonic fault / missing) |
-| 下り・… | the same for the "down" direction |
-| 経度 / 緯度 | counter location (WGS84) |
+| 経度 / 緯度 | counter location (WGS84), last two columns |
+
+- **Permanent counters (`loop_*`)**: 上り・小型交通量 / 上り・大型交通量 / 上り・車種判別不能交通量 (vehicles in the interval, "up" direction: small / large / unclassified) and the flags 上り・停電 / 上り・ループ異常 / 上り・超音波異常 / 上り・欠測 (1 = power failure / loop fault / ultrasonic fault / missing); the same for 下り ("down").
+- **CCTV, hourly (`cctv_1h_*`)**: 上り・自動車交通量 (all vehicles), 上り・小型交通量, 上り・大型交通量, 上り・小型大型判別不能交通量, and 上り・5分欠測処理フラグ (API specification: 1 = "5-minute processing", 2 = "1 hour"; 0 also occurs and is not defined there); the same for 下り.
+- **CCTV, 5-minute (`cctv_5m_*`)**: the same counts with the suffix （集計値）, blank when the camera is not at its preset position, plus camera status fields (カメラプリセット位置, 気象影響による映像不良, 照度不足, 突発事象（交通事故等）, サーバの稼働, カメラの映像受信, 映像のデコード処理, デコード映像から映像解析機能への取込加工処理の失敗, 映像解析機能のフリーズ, その他エラー: 0 = normal, 1 = abnormal, blank = could not be judged).
+
+Files collected before 2026-10-06 (commit `906b6d6`) used the permanent-counter field names for the CCTV layers and lost their counts; those files were deleted and fetched again.
+
+`data/counters.csv` lists every counter (ID and sensor) with its location and the prefecture, municipality and town at that point, from the GSI reverse geocoder (出典：国土地理院). The API gives no road or place names. Two counters got no municipality from the geocoder.
 
 ## Caveats
 
 - These are counts, not speeds. Congestion has to be inferred, for example by comparing a count with the same weekday and hour.
 - The values are reference values, not official MLIT traffic survey results. Some counters are unpublished at times because of faults.
-- The API does not give road names. The counter location is the only position information.
+- The API does not give road names, and route numbers are not added here: the only route-name sources found were non-commercial (National Land Numerical Information, emergency transport roads) or share-alike (OpenStreetMap). Place names come from the location.
 
 ## How it is collected
 
