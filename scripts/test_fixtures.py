@@ -1,6 +1,6 @@
 """Tests against records the API really sent (tests/fixtures_live_20261005.json, one per layer with counts and,
 where the layer had one, one with blanks): every field reaches the CSV, and build_kaggle.py turns the four
-layers into the English tables without losing a count."""
+layers into the English tables without losing a count, and make_kaggle_meta.py describes every column."""
 import csv, json, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -35,14 +35,17 @@ with tempfile.TemporaryDirectory() as tmp:
         sensor = ASSET[layer].split("_")[0]
         ids |= {(f["properties"]["常時観測点コード"], sensor) for f in recs}
     counters = os.path.join(tmp, "counters.csv")
+    HEADER = ["counter_id", "sensor", "road_type", "longitude", "latitude", "prefecture", "municipality_code",
+              "municipality", "town", "in_5min_box", "last_seen"]
     with open(counters, "w", newline="", encoding="utf-8") as g:
-        w = csv.writer(g); w.writerow(["counter_id", "sensor"]); w.writerows(sorted(ids))
+        w = csv.writer(g); w.writerow(HEADER)
+        w.writerows([[i, s, 3, 139.6, 35.4, "神奈川県", "14101", "横浜市鶴見区", "", True, "2026-10-05"] for i, s in sorted(ids)])
     out = os.path.join(tmp, "out")
     build = [sys.executable, os.path.join(HERE, "build_kaggle.py"), src, out, "--counters", counters]
     r = subprocess.run(build, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    h = pd.read_parquet(os.path.join(out, "hourly", "2026-10.parquet"))
-    m = pd.read_parquet(os.path.join(out, "five_minute_kanto", "2026-10.parquet"))
+    h = pd.read_parquet(os.path.join(out, "hourly_2026-10.parquet"))
+    m = pd.read_parquet(os.path.join(out, "five_minute_kanto_2026-10.parquet"))
     for df, layers in ((h, ["t_travospublic_measure_1h", "t_travospublic_measure_1h_img"]),
                        (m, ["t_travospublic_measure_5m", "t_travospublic_measure_5m_img"])):
         for layer in layers:
@@ -60,9 +63,28 @@ with tempfile.TemporaryDirectory() as tmp:
                     assert pd.isna(row["up_total"])
     assert str(h.up_missing_processing.dtype) == "Int8" and str(m.cam_preset_position.dtype) == "boolean"
     assert len(h) == len(FIX["t_travospublic_measure_1h"]) + len(FIX["t_travospublic_measure_1h_img"])
-    # 3. a counter missing from counters.csv fails the build
+    assert sorted(os.listdir(out)) == ["counters.csv", "five_minute_kanto_2026-10.parquet", "hourly_2026-10.parquet"]
+    # 3. Kaggle metadata: one resource per file, every column described; an undescribed column stops it
+    meta = [sys.executable, os.path.join(HERE, "make_kaggle_meta.py")]
+    settings = os.path.join(tmp, "settings.json")
+    r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    md = json.load(open(os.path.join(out, "dataset-metadata.json"), encoding="utf-8"))
+    FILES = ["counters.csv", "five_minute_kanto_2026-10.parquet", "hourly_2026-10.parquet"]
+    assert sorted(x["path"] for x in md["resources"]) == FILES
+    for x in md["resources"]:
+        names = [f["name"] for f in x["schema"]["fields"]]
+        actual = list(pd.read_csv(os.path.join(out, x["path"]), nrows=0).columns) if x["path"].endswith(".csv")             else list(pd.read_parquet(os.path.join(out, x["path"])).columns)
+        assert names == actual and all(f["description"] for f in x["schema"]["fields"]), x["path"]
+    st = json.load(open(settings, encoding="utf-8"))
+    assert set(st["files"]) == {x["path"] for x in md["resources"]}
+    assert md["licenses"] == [{"name": "CC-BY-4.0"}] and len(md["keywords"]) <= 5
+    h.assign(extra=1).to_parquet(os.path.join(out, "hourly_2026-10.parquet"), index=False)
+    r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
+    assert r.returncode != 0 and "without a description" in (r.stderr + r.stdout), r.stderr
+    # 4. a counter missing from counters.csv fails the build
     with open(counters, "w", newline="", encoding="utf-8") as g:
-        w = csv.writer(g); w.writerow(["counter_id", "sensor"]); w.writerows(sorted(ids)[1:])
+        w = csv.writer(g); w.writerow(["counter_id", "sensor"]); w.writerows(sorted(ids)[1:])  # build_kaggle reads only these two
     r = subprocess.run(build[:3] + [out + "2", "--counters", counters], capture_output=True, text=True)
     assert r.returncode != 0 and "not in" in (r.stderr + r.stdout), r.stderr
 print("test_fixtures: ALL PASS")

@@ -1,8 +1,9 @@
 """Turn the daily release files into the Kaggle layout: one Parquet file per month and resolution, English
 column names, JST timestamps. Input: a directory holding the downloaded release assets (any depth).
 
-  hourly/YYYY-MM.parquet          nationwide, hourly (permanent and CCTV counters, national highways and expressways)
-  five_minute_kanto/YYYY-MM.parquet  Kanto box, every 5 minutes
+  hourly_YYYY-MM.parquet             nationwide, hourly (permanent and CCTV counters, national highways and expressways)
+  five_minute_kanto_YYYY-MM.parquet  Kanto box, every 5 minutes
+Files are flat (no folders) so the upload does not depend on how Kaggle unpacks folders.
   counters.csv                    one row per counter with location and place names"""
 import argparse, glob, os, re, shutil, sys
 import pandas as pd
@@ -106,10 +107,9 @@ def main():
         if dup:
             sys.exit(f"{res} {month}: {dup} duplicated (time, counter, sensor) rows")
         unknown |= set(df[["counter_id", "sensor"]].drop_duplicates().itertuples(index=False, name=None)) - known
-        sub = "hourly" if res == "1h" else "five_minute_kanto"
-        os.makedirs(os.path.join(a.out, sub), exist_ok=True)
-        df.to_parquet(os.path.join(a.out, sub, f"{month}.parquet"), index=False, compression="zstd")
-        print(f"{sub}/{month}.parquet: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)
+        name = ("hourly" if res == "1h" else "five_minute_kanto") + f"_{month}.parquet"
+        df.to_parquet(os.path.join(a.out, name), index=False, compression="zstd")
+        print(f"{name}: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)
     if unknown:
         sys.exit(f"{len(unknown)} counters are not in {a.counters} (rebuild it with --from-files): {sorted(unknown)[:10]}")
     shutil.copyfile(a.counters, os.path.join(a.out, "counters.csv"))

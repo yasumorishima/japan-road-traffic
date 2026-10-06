@@ -1,0 +1,132 @@
+name: Publish to Kaggle
+
+# After each collect run, rebuild the Kaggle files from every release asset and publish a new version
+# when the set of archived files changed. Scheduled (workflow_run) publishing starts only after the
+# repository variable KAGGLE_PUBLISH is set to true; a manual run with publish=true always publishes
+# the current build (and creates the dataset the first time).
+on:
+  workflow_run:
+    workflows: ['Collect traffic volume']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: 'Why this run'
+        required: true
+        type: string
+      publish:
+        description: 'Publish a version even if no file changed'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATASET: yasunorim/japan-road-traffic-volume
+    steps:
+      # the branch head, not the commit that triggered the run: a queued run must see the
+      # published list written by the run before it
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install and test
+        run: |
+          pip install --quiet pandas pyarrow kaggle==2.2.4
+          python scripts/test_fetch.py
+          python scripts/test_collect.py
+          python scripts/test_fixtures.py
+
+      - name: Compare the archive with the last published version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          # name and sha256 of every asset in the raw-* releases: a new, replaced or deleted file changes it
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | select(.tag_name | startswith("raw-")) | .tag_name as $t | .assets[] | "\($t) \(.name) \(.digest)"' \
+            | sort > assets.txt
+          test -s assets.txt
+          if grep -q ' null$' assets.txt; then echo "an asset has no digest"; exit 1; fi
+          echo "$(wc -l < assets.txt) archived files"
+          if cmp -s assets.txt data/published_assets.txt; then
+            echo "CHANGED=false" >> "$GITHUB_ENV"; echo "No file changed since the last published version."
+          else
+            echo "CHANGED=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Download every archived file and build the Kaggle files
+        if: env.CHANGED == 'true' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for tag in $(cut -d' ' -f1 assets.txt | sort -u); do
+            gh release download "$tag" --dir "dl/$tag" --pattern '*.csv.gz'
+          done
+          test "$(find dl -name '*.csv.gz' | wc -l)" -eq "$(wc -l < assets.txt)"
+          python scripts/build_counters.py --from-files dl --no-api
+          python scripts/build_kaggle.py dl _build --counters data/counters.csv
+          python scripts/make_kaggle_meta.py _build
+          ls -la _build
+
+      - name: Publish a Kaggle version
+        if: >-
+          inputs.publish ||
+          (github.event_name == 'workflow_run' && vars.KAGGLE_PUBLISH == 'true' && env.CHANGED == 'true')
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          set -o pipefail
+          last=$(grep -oE '_[0-9]{8}\.csv\.gz' assets.txt | tr -dc '0-9\n' | sort | tail -1)
+          if prev=$(kaggle datasets status --format 'json(current_version_number)' "$DATASET" 2>/dev/null | jq -er .current_version_number); then
+            kaggle datasets version -p _build -m "Archive through ${last}" 2>&1 | tee kaggle.log
+          else
+            # a dataset that exists but could not be read is refused by create ("already in use")
+            echo "The dataset does not exist yet (or is not visible): creating it."
+            prev=0
+            kaggle datasets create -p _build -u 2>&1 | tee kaggle.log
+          fi
+          # the CLI can print a rejected upload and still exit 0
+          if grep -qiE "error|unsuccessful|forbidden|not valid" kaggle.log; then exit 1; fi
+          # record the archive as published only once Kaggle has finished processing the new version
+          for i in $(seq 1 60); do
+            js=$(kaggle datasets status --format 'json(status,current_version_number)' "$DATASET" 2>/dev/null || true)
+            echo "status: $js (before upload: version $prev)"
+            ok=$(echo "$js" | jq -r --argjson p "$prev" 'select(.status == "ready" and .current_version_number > $p) | "ok"' 2>/dev/null || true)
+            if [ "$ok" = ok ]; then break; fi
+            if [ "$i" = 60 ]; then echo "new dataset version not ready after 30 minutes"; exit 1; fi
+            sleep 30
+          done
+          cp assets.txt data/published_assets.txt
+          echo "PUBLISHED=true" >> "$GITHUB_ENV"
+
+      # Keep the counter table and the column descriptions in the repository; record what was published
+      # only after the version is ready, so a failed upload is retried on the next run.
+      - name: Commit the counter table and the published list
+        if: env.CHANGED == 'true' || inputs.publish
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add data/counters.csv data/geocode_cache.json kaggle/settings.json
+          if [ "$PUBLISHED" = "true" ]; then git add data/published_assets.txt; fi
+          if git diff --cached --quiet; then echo "Nothing to commit."; exit 0; fi
+          git commit -m "Update counters and Kaggle metadata"
+          git pull --rebase --quiet
+          git push

@@ -1,0 +1,132 @@
+"""Write dataset-metadata.json (uploaded with every version) into the Kaggle build directory and
+kaggle/settings.json (the column descriptions, kept to enter on the dataset page by hand: the upload sends
+them in resources[].schema, but on the Earth Vital Signs dataset they did not appear on the page), from one
+list of descriptions. Stops if a built file has a column that
+is not described or lacks one that is, so the two cannot drift from the data.
+
+  python scripts/make_kaggle_meta.py <build dir> [--settings PATH]"""
+import argparse, json, os, re, sys
+import pandas as pd
+import pyarrow.parquet as pq
+
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+ID = "yasunorim/japan-road-traffic-volume"
+TITLE = "Japan Road Traffic Volume (Hourly Archive)"
+SUBTITLE = "Vehicle counts on Japan's national highways, hourly nationwide and 5-min Kanto"
+SOURCES = ("MLIT Traffic Volume API (交通量API, reference values), data provided by the Japan Road Traffic "
+           "Information Center (JARTIC, https://www.jartic-open-traffic.org/); place names from the GSI reverse "
+           "geocoder (国土地理院). Collected three times a day and built by https://github.com/yasumorishima/japan-road-traffic, "
+           "which uploads a day only when every check passes.")
+
+DIR = {"up": "the 'up' direction (上り)", "down": "the 'down' direction (下り)"}
+COLS = {
+    "time_jst": "Start of the interval (the source's time code), Japan Standard Time (UTC+9), no time zone attached. "
+                "Five-minute code 09:05 is 09:05-09:09 in the API specification",
+    "counter_id": "Counter ID (常時観測点コード). The same ID can exist as a permanent counter and as a CCTV counter: "
+                  "the key is (counter_id, sensor); join counters.csv on both",
+    "sensor": "loop = permanent counter (loop or ultrasonic detector), cctv = AI count on CCTV images",
+    "road_type": "1 = expressway (高速自動車国道) with an MLIT counter, 3 = national highway (一般国道)",
+    "regional_bureau": "Regional bureau number (地方整備局等番号): 81 Hokkaido, 82 Tohoku, 83 Kanto, 84 Hokuriku, "
+                       "85 Chubu, 86 Kinki, 87 Chugoku, 88 Shikoku, 89 Kyushu, 90 Okinawa",
+    "sub_region": "Sub-region code (開発建設部／都道府県コード) as given by the source; empty outside Hokkaido and Chubu",
+}
+for d in ("up", "down"):
+    w = DIR[d]
+    COLS |= {
+        f"{d}_total": f"All vehicles in the interval, {w}. CCTV counters only (the source gives it directly); empty for "
+                      f"permanent counters, where it is {d}_small + {d}_large + {d}_unclassified",
+        f"{d}_small": f"Small vehicles in the interval, {w}; empty when the source gives no value",
+        f"{d}_large": f"Large vehicles in the interval, {w}; empty when the source gives no value",
+        f"{d}_unclassified": f"Vehicles whose size could not be told, {w}",
+        f"{d}_power_failure": f"Permanent counters: True when the source flags a power failure, {w}; empty for CCTV",
+        f"{d}_loop_fault": f"Permanent counters: True when the source flags a loop detector fault, {w}; empty for CCTV",
+        f"{d}_ultrasonic_fault": f"Permanent counters: True when the source flags an ultrasonic detector fault, {w}; "
+                                 f"empty for CCTV",
+        f"{d}_missing": f"Permanent counters: True when the source flags the value as missing (欠測), {w}; empty for CCTV",
+        f"{d}_missing_processing": f"Hourly CCTV only: the source's 5分欠測処理フラグ, {w}. The API specification "
+                                   f"defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not "
+                                   f"defined there. Kept as the integer code",
+    }
+CAM = {
+    "cam_preset_position": "camera is off its preset position (カメラプリセット位置); the source blanks the counts then",
+    "cam_weather_degraded": "image degraded by weather (気象影響による映像不良)",
+    "cam_low_light": "not enough light (照度不足)",
+    "cam_incident": "incident such as a traffic accident (突発事象（交通事故等）)",
+    "cam_server_status": "server not running (サーバの稼働)",
+    "cam_feed_status": "video feed not received (カメラの映像受信)",
+    "cam_decode_status": "video decoding failed (映像のデコード処理)",
+    "cam_import_failure": "decoded video could not be passed to the analyser (取込加工処理の失敗)",
+    "cam_analyzer_freeze": "the image analyser froze (映像解析機能のフリーズ)",
+    "cam_other_error": "other error (その他エラー)",
+}
+for k, v in CAM.items():
+    COLS[k] = f"Five-minute CCTV rows only: True = {v}, False = normal, empty = could not be judged or not a CCTV row"
+COUNTER_COLS = {
+    "counter_id": "Counter ID (常時観測点コード)",
+    "sensor": "loop = permanent counter, cctv = AI count on CCTV images; (counter_id, sensor) is the key",
+    "road_type": "1 = expressway, 3 = national highway",
+    "longitude": "Longitude, WGS84, as given by the source",
+    "latitude": "Latitude, WGS84, as given by the source",
+    "prefecture": "Prefecture at the location (Japanese), from the GSI reverse geocoder",
+    "municipality_code": "Five-digit local government code (全国地方公共団体コード without the check digit) with its "
+                         "leading zero (01337); read it as text, e.g. pandas dtype={'municipality_code': str}",
+    "municipality": "City, ward, town or village at the location (Japanese)",
+    "town": "Town or district name at the location (Japanese), from the GSI reverse geocoder; can be empty",
+    "in_5min_box": "True when the counter is inside the Kanto box that has five-minute data "
+                   "(longitude 138.4-140.95, latitude 34.85-37.2)",
+    "last_seen": "Latest day (JST) this counter reported in the API or in the archive",
+}
+
+FILE_DESC = {
+    "hourly": "Hourly vehicle counts for {m} (JST), nationwide: permanent and CCTV counters on national highways and "
+              "the expressways that have MLIT counters. One row per hour, counter and sensor.",
+    "five_minute_kanto": "Five-minute vehicle counts for {m} (JST) inside the Kanto box (Tokyo, Kanagawa, Saitama, "
+                         "Chiba, Ibaraki, Tochigi, Gunma and edges): permanent and CCTV counters. One row per "
+                         "five minutes, counter and sensor.",
+}
+DESCRIPTION = open(os.path.join(ROOT, "kaggle", "description.md"), encoding="utf-8").read().strip()
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("out"); ap.add_argument("--settings", default=os.path.join(ROOT, "kaggle", "settings.json"))
+    a = ap.parse_args()
+    out = a.out
+    resources, files = [], {}
+    names = sorted(os.listdir(out))
+    for n in names:
+        p = os.path.join(out, n)
+        m = re.match(r"^(hourly|five_minute_kanto)_(\d{4}-\d{2})\.parquet$", n)
+        if m:
+            cols = pq.read_schema(p).names
+            desc = FILE_DESC[m.group(1)].format(m=m.group(2))
+            table = COLS
+        elif n == "counters.csv":
+            cols = pd.read_csv(p, nrows=0).columns.tolist()
+            desc = ("One row per counter (ID and sensor) seen in the API or the archive: location, prefecture, "
+                    "municipality and town (GSI reverse geocoder), and the last day it reported.")
+            table = COUNTER_COLS
+        elif n == "dataset-metadata.json":
+            continue
+        else:
+            sys.exit(f"unexpected file in the build: {n}")
+        missing = [c for c in cols if c not in table]
+        if missing:
+            sys.exit(f"{n}: columns without a description: {missing}")
+        if table is COUNTER_COLS and set(cols) != set(table):
+            sys.exit(f"{n}: described columns not in the file: {sorted(set(table) - set(cols))}")
+        resources.append({"path": n, "description": desc,
+                          "schema": {"fields": [{"name": c, "description": table[c]} for c in cols]}})
+        files[n] = {"description": desc, "columns": {c: table[c] for c in cols}}
+    if not any(n.startswith("hourly_") for n in files) or "counters.csv" not in files:
+        sys.exit("the build has no hourly file or no counters.csv")
+    meta = {"title": TITLE, "subtitle": SUBTITLE, "id": ID, "licenses": [{"name": "CC-BY-4.0"}],
+            "keywords": ["transportation", "time series analysis", "japan", "automobiles and vehicles", "tabular"],
+            "expectedUpdateFrequency": "daily", "description": DESCRIPTION, "resources": resources}
+    json.dump(meta, open(os.path.join(out, "dataset-metadata.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    settings = {"id": ID, "expectedUpdateFrequency": "daily", "userSpecifiedSources": SOURCES, "files": files}
+    with open(a.settings, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2); f.write("\n")
+    print(f"metadata for {len(resources)} files")
+
+if __name__ == "__main__":
+    main()

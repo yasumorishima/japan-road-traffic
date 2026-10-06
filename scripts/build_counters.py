@@ -23,7 +23,15 @@ HEADER = ["counter_id", "sensor", "road_type", "longitude", "latitude", "prefect
 ASSET = re.compile(r"^(loop|cctv)_(5m|1h)_road([13])_(\d{8})\.csv\.gz$")
 
 def municipalities():
-    text = urllib.request.urlopen(MUNI, timeout=60).read().decode("utf-8")
+    for attempt in range(4):
+        try:
+            text = urllib.request.urlopen(MUNI, timeout=60).read().decode("utf-8")
+            break
+        except Exception as e:
+            if attempt == 3:
+                raise
+            print(f"  muni.js retry {attempt}: {e}", flush=True)
+            time.sleep(10 * 2 ** attempt)
     out = {}
     for code, val in re.findall(r'MUNI_ARRAY\["(\d+)"\]\s*=\s*\'([^\']*)\'', text):
         pref_code, pref, _, name = val.split(",")
