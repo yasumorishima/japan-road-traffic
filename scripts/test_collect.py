@@ -4,6 +4,11 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(__file__))
 import fetch, collect
 
+def props(layer, code, cid):
+    p = {c: 0 for c in fetch.SCHEMA[layer]}
+    p.update({"時間コード": int(code), "常時観測点コード": cid, "観測年月日": int(code[:8])})
+    return p
+
 def run(source, releases=None, upload_fails=(), upload_broken=(), max_days=100):
     """source(layer, road, day) -> set of time codes present, or {code: counters}, or 'fail'.
     Returns (exit code, releases, stdout)."""
@@ -29,7 +34,7 @@ def run(source, releases=None, upload_fails=(), upload_broken=(), max_days=100):
             raise RuntimeError("down")
         if not isinstance(got, dict):
             got = {c: 1 for c in got}
-        return [{"properties": {"時間コード": int(c), "常時観測点コード": i}, "geometry": {"coordinates": [[139.0, 35.0]]}}
+        return [{"properties": props(layer, c, i), "geometry": {"coordinates": [[139.0, 35.0]]}}
                 for c in sorted(got) if t0 <= c <= t1 for i in range(got[c])]
     collect.release_assets, collect.gh = release_assets, gh
     fetch.get = get

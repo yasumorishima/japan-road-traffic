@@ -141,7 +141,7 @@ def main():
                     if lacking:
                         gaps.append(f"{short}_road{road}_{day} ({lacking} of {len(expected)} codes missing)")
                     path = os.path.join(tmp, asset_name(short, road, day))
-                    fetch.write_csv(path, rows)
+                    fetch.write_csv(path, rows, layer)
                     if upload(tag, path, cache):
                         print(f"  {short} road{road} {day}: {len(rows)} rows, {len(present)} codes", flush=True)
                     else:
