@@ -2,7 +2,7 @@
 
 Vehicle counts from the traffic counters of Japan's Ministry of Land, Infrastructure, Transport and Tourism (MLIT) on national highways and expressways, collected every day and kept.
 
-- **Nationwide, hourly**: permanent counters and AI counters on CCTV images, both directions, small and large vehicles (on 2026-10-05: 993 permanent and 981 CCTV counters on national highways, 76 on expressways).
+- **Nationwide, hourly**: permanent counters and AI counters on CCTV images, both directions, small and large vehicles (on 2026-10-05: 993 permanent and 981 CCTV counters on national highways; 76 permanent and 1 CCTV counter on expressways).
 - **Kanto, every 5 minutes**: the same kinds of counters inside the box longitude 138.4–140.95, latitude 34.85–37.2 (Tokyo, Kanagawa, Saitama, Chiba, Ibaraki, Tochigi, Gunma, and the edges of neighbouring prefectures).
 
 The source API only keeps **5-minute values for about one month and hourly values for about three months**. Older values are gone from the source, so this archive is the only place they remain.
@@ -36,11 +36,13 @@ Columns are the source's own names (Japanese), plus longitude and latitude. Each
 
 - **Permanent counters (`loop_*`)**: 上り・小型交通量 / 上り・大型交通量 / 上り・車種判別不能交通量 (vehicles in the interval, "up" direction: small / large / unclassified) and the flags 上り・停電 / 上り・ループ異常 / 上り・超音波異常 / 上り・欠測 (1 = power failure / loop fault / ultrasonic fault / missing); the same for 下り ("down").
 - **CCTV, hourly (`cctv_1h_*`)**: 上り・自動車交通量 (all vehicles), 上り・小型交通量, 上り・大型交通量, 上り・小型大型判別不能交通量, and 上り・5分欠測処理フラグ (API specification: 1 = "5-minute processing", 2 = "1 hour"; 0 also occurs and is not defined there); the same for 下り.
-- **CCTV, 5-minute (`cctv_5m_*`)**: the same counts with the suffix （集計値）, blank when the camera is not at its preset position, plus camera status fields (カメラプリセット位置, 気象影響による映像不良, 照度不足, 突発事象（交通事故等）, サーバの稼働, カメラの映像受信, 映像のデコード処理, デコード映像から映像解析機能への取込加工処理の失敗, 映像解析機能のフリーズ, その他エラー: 0 = normal, 1 = abnormal, blank = could not be judged).
+- **CCTV, 5-minute (`cctv_5m_*`)**: the same counts with the suffix （集計値）, plus camera status fields (カメラプリセット位置, 気象影響による映像不良, 照度不足, 突発事象（交通事故等）, サーバの稼働, カメラの映像受信, 映像のデコード処理, デコード映像から映像解析機能への取込加工処理の失敗, 映像解析機能のフリーズ, その他エラー: 0 = normal, 1 = abnormal, blank = could not be judged).
 
-Files collected before 2026-10-06 (commit `906b6d6`) used the permanent-counter field names for the CCTV layers and lost their counts; those files were deleted and fetched again.
+CCTV counts are often blank. In the September 2026 five-minute data 28% of CCTV rows have no counts (the specification blanks them when the camera is off its preset position, 19% of rows, but 9% are blank with the camera at its preset); in the July 2026 hourly data 39% are blank, and where filled the total differs from small + large + unclassified in 1.4% of rows. Permanent-counter rows are almost always filled.
 
-`data/counters.csv` lists every counter (ID and sensor) with its location and the prefecture, municipality and town at that point, from the GSI reverse geocoder (出典：国土地理院). The API gives no road or place names. Two counters got no municipality from the geocoder.
+Files collected before 2026-10-06 (commit `906b6d6`) used the permanent-counter field names for the CCTV layers and lost their counts. Those files were deleted and the CCTV days are being fetched again while the source still holds them (from 2026-07-05 hourly and 2026-09-05 five-minute).
+
+`data/counters.csv` lists every counter (ID and sensor) seen in the API or in the archive, with its location, the prefecture, municipality and town at that point from the GSI reverse geocoder (出典：国土地理院), and `last_seen`, the latest day it reported. A counter that stops reporting keeps its row. The API gives no road or place names. Two counters got no municipality from the geocoder.
 
 ## Caveats
 

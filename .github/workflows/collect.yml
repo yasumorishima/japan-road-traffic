@@ -46,8 +46,10 @@ jobs:
 
       - name: Test the fetcher and the collector (offline)
         run: |
+          pip install --quiet pandas pyarrow
           python scripts/test_fetch.py
           python scripts/test_collect.py
+          python scripts/test_fixtures.py
 
       - name: Fetch missing days and upload them to releases
         env:

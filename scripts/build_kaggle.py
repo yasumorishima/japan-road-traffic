@@ -92,6 +92,8 @@ def main():
     if not groups:
         sys.exit("no release files found")
     os.makedirs(a.out, exist_ok=True)
+    known = set(pd.read_csv(a.counters, usecols=["counter_id", "sensor"]).itertuples(index=False, name=None))
+    unknown = set()
     for (res, month), files in sorted(groups.items()):
         parts = [read(p, s, res) for p, s in sorted(files)]
         df = pd.concat(parts, ignore_index=True)
@@ -103,10 +105,13 @@ def main():
         dup = df.duplicated(["time_jst", "counter_id", "sensor"]).sum()
         if dup:
             sys.exit(f"{res} {month}: {dup} duplicated (time, counter, sensor) rows")
+        unknown |= set(df[["counter_id", "sensor"]].drop_duplicates().itertuples(index=False, name=None)) - known
         sub = "hourly" if res == "1h" else "five_minute_kanto"
         os.makedirs(os.path.join(a.out, sub), exist_ok=True)
         df.to_parquet(os.path.join(a.out, sub, f"{month}.parquet"), index=False, compression="zstd")
         print(f"{sub}/{month}.parquet: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)
+    if unknown:
+        sys.exit(f"{len(unknown)} counters are not in {a.counters} (rebuild it with --from-files): {sorted(unknown)[:10]}")
     shutil.copyfile(a.counters, os.path.join(a.out, "counters.csv"))
 
 if __name__ == "__main__":
