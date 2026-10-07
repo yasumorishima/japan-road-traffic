@@ -1,0 +1,17 @@
+{
+ "id": "yasunorim/japan-road-traffic-a-first-look",
+ "title": "Japan Road Traffic: a first look",
+ "code_file": "japan-road-traffic-a-first-look.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": false,
+ "enable_gpu": false,
+ "enable_tpu": false,
+ "enable_internet": false,
+ "dataset_sources": [
+  "yasunorim/japan-road-traffic-volume"
+ ],
+ "competition_sources": [],
+ "kernel_sources": [],
+ "model_sources": []
+}

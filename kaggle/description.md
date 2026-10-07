@@ -4,6 +4,8 @@ The source API keeps only about **three months of hourly values and one month of
 
 Source code, checks and the raw daily files: https://github.com/yasumorishima/japan-road-traffic
 
+Notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffic-a-first-look) (when traffic peaks, trucks at night, and which days were busier than usual).
+
 ## Files
 
 | File | What |
