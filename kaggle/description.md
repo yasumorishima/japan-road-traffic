@@ -10,8 +10,10 @@ Notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffi
 
 | File | What |
 |---|---|
-| `hourly_YYYY-MM.parquet` | Nationwide, hourly, one file per month (JST): permanent and CCTV counters |
-| `five_minute_kanto_YYYY-MM.parquet` | Kanto box, every five minutes, one file per month, with camera status for CCTV rows |
+| `hourly_YYYY-MM_DD-DD.parquet` | Nationwide, hourly, one file per ten days (days 01-10, 11-20, 21 to the end of the month, JST): permanent and CCTV counters |
+| `five_minute_kanto_YYYY-MM_DD-DD.parquet` | Kanto box, every five minutes, one file per ten days, with camera status for CCTV rows |
+
+Read a whole resolution at once with `pd.concat(pd.read_parquet(p) for p in sorted(glob.glob(".../hourly_*.parquet")))`.
 | `counters.csv` | One row per counter: location, prefecture, municipality and town, last day seen (read `municipality_code` as text to keep its leading zero) |
 
 The key of a row is (`time_jst`, `counter_id`, `sensor`). The same ID can exist as a permanent counter (`loop`) and as a CCTV counter (`cctv`), so join `counters.csv` on both columns.

@@ -95,10 +95,10 @@ def main():
     names = sorted(os.listdir(out))
     for n in names:
         p = os.path.join(out, n)
-        m = re.match(r"^(hourly|five_minute_kanto)_(\d{4}-\d{2})\.parquet$", n)
+        m = re.match(r"^(hourly|five_minute_kanto)_(\d{4}-\d{2})_(\d{2})-(\d{2})\.parquet$", n)
         if m:
             cols = pq.read_schema(p).names
-            desc = FILE_DESC[m.group(1)].format(m=m.group(2))
+            desc = FILE_DESC[m.group(1)].format(m=f"{m.group(2)}-{m.group(3)} to {m.group(2)}-{m.group(4)}")
             table = COLS
         elif n == "counters.csv":
             cols = pd.read_csv(p, nrows=0).columns.tolist()

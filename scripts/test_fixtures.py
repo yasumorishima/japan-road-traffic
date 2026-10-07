@@ -44,8 +44,8 @@ with tempfile.TemporaryDirectory() as tmp:
     build = [sys.executable, os.path.join(HERE, "build_kaggle.py"), src, out, "--counters", counters]
     r = subprocess.run(build, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    h = pd.read_parquet(os.path.join(out, "hourly_2026-10.parquet"))
-    m = pd.read_parquet(os.path.join(out, "five_minute_kanto_2026-10.parquet"))
+    h = pd.read_parquet(os.path.join(out, "hourly_2026-10_01-10.parquet"))
+    m = pd.read_parquet(os.path.join(out, "five_minute_kanto_2026-10_01-10.parquet"))
     for df, layers in ((h, ["t_travospublic_measure_1h", "t_travospublic_measure_1h_img"]),
                        (m, ["t_travospublic_measure_5m", "t_travospublic_measure_5m_img"])):
         for layer in layers:
@@ -63,14 +63,19 @@ with tempfile.TemporaryDirectory() as tmp:
                     assert pd.isna(row["up_total"])
     assert str(h.up_missing_processing.dtype) == "Int8" and str(m.cam_preset_position.dtype) == "boolean"
     assert len(h) == len(FIX["t_travospublic_measure_1h"]) + len(FIX["t_travospublic_measure_1h_img"])
-    assert sorted(os.listdir(out)) == ["counters.csv", "five_minute_kanto_2026-10.parquet", "hourly_2026-10.parquet"]
+    assert sorted(os.listdir(out)) == ["counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
+    # ten-day chunks: names do not depend on which days are present yet
+    import build_kaggle
+    assert [build_kaggle.chunk(d) for d in ("20261001", "20261010", "20261011", "20261020", "20261021", "20261031",
+            "20260221", "20280229", "20260930")] == ["2026-10_01-10", "2026-10_01-10", "2026-10_11-20", "2026-10_11-20",
+            "2026-10_21-31", "2026-10_21-31", "2026-02_21-28", "2028-02_21-29", "2026-09_21-30"]
     # 3. Kaggle metadata: one resource per file, every column described; an undescribed column stops it
     meta = [sys.executable, os.path.join(HERE, "make_kaggle_meta.py")]
     settings = os.path.join(tmp, "settings.json")
     r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     md = json.load(open(os.path.join(out, "dataset-metadata.json"), encoding="utf-8"))
-    FILES = ["counters.csv", "five_minute_kanto_2026-10.parquet", "hourly_2026-10.parquet"]
+    FILES = ["counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
     assert sorted(x["path"] for x in md["resources"]) == FILES
     for x in md["resources"]:
         names = [f["name"] for f in x["schema"]["fields"]]
@@ -79,7 +84,7 @@ with tempfile.TemporaryDirectory() as tmp:
     st = json.load(open(settings, encoding="utf-8"))
     assert set(st["files"]) == {x["path"] for x in md["resources"]}
     assert md["licenses"] == [{"name": "CC-BY-4.0"}] and len(md["keywords"]) <= 5
-    h.assign(extra=1).to_parquet(os.path.join(out, "hourly_2026-10.parquet"), index=False)
+    h.assign(extra=1).to_parquet(os.path.join(out, "hourly_2026-10_01-10.parquet"), index=False)
     r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
     assert r.returncode != 0 and "without a description" in (r.stderr + r.stdout), r.stderr
     # 4. a counter missing from counters.csv fails the build

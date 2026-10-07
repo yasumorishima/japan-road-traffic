@@ -1,11 +1,15 @@
-"""Turn the daily release files into the Kaggle layout: one Parquet file per month and resolution, English
-column names, JST timestamps. Input: a directory holding the downloaded release assets (any depth).
+"""Turn the daily release files into the Kaggle layout: one Parquet file per ten days (days 1-10, 11-20 and 21 to
+the end of the month) and resolution, English column names, JST timestamps. Input: a directory holding the
+downloaded release assets (any depth).
 
-  hourly_YYYY-MM.parquet             nationwide, hourly (permanent and CCTV counters, national highways and expressways)
-  five_minute_kanto_YYYY-MM.parquet  Kanto box, every 5 minutes
-Files are flat (no folders) so the upload does not depend on how Kaggle unpacks folders.
+  hourly_YYYY-MM_DD-DD.parquet             nationwide, hourly (permanent and CCTV counters, national highways and expressways)
+  five_minute_kanto_YYYY-MM_DD-DD.parquet  Kanto box, every 5 minutes
+Files are flat (no folders) so the upload does not depend on how Kaggle unpacks folders. Kaggle's file preview
+failed on monthly files of 1.1 million rows and more and worked up to 900,000 (measured 2026-10-07); ten days
+are at most about 0.6 million rows. The name of a chunk stays the same while its days fill in, so descriptions
+entered on the dataset page carry over to later versions.
   counters.csv                    one row per counter with location and place names"""
-import argparse, glob, os, re, shutil, sys
+import argparse, calendar, glob, os, re, shutil, sys
 import pandas as pd
 
 KEY = {"時間コード": "time_code", "常時観測点コード": "counter_id", "道路種別": "road_type",
@@ -80,6 +84,12 @@ def read(path, sensor, res):
     cols = ORDER + (STATUS if (sensor, res) == ("cctv", "5m") else [])
     return df[cols]
 
+def chunk(day):
+    """YYYYMMDD -> 'YYYY-MM_01-10', 'YYYY-MM_11-20' or 'YYYY-MM_21-<last day of the month>'."""
+    y, m, d = int(day[:4]), int(day[4:6]), int(day[6:])
+    a, b = (1, 10) if d <= 10 else (11, 20) if d <= 20 else (21, calendar.monthrange(y, m)[1])
+    return f"{y:04d}-{m:02d}_{a:02d}-{b:02d}"
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("out"); ap.add_argument("--counters", required=True)
@@ -89,7 +99,7 @@ def main():
         m = NAME.match(os.path.basename(p))
         if m:
             sensor, res, road, day = m.groups()
-            groups.setdefault((res, day[:4] + "-" + day[4:6]), []).append((p, sensor))
+            groups.setdefault((res, chunk(day)), []).append((p, sensor))
     if not groups:
         sys.exit("no release files found")
     os.makedirs(a.out, exist_ok=True)
@@ -107,7 +117,7 @@ def main():
         if dup:
             sys.exit(f"{res} {month}: {dup} duplicated (time, counter, sensor) rows")
         unknown |= set(df[["counter_id", "sensor"]].drop_duplicates().itertuples(index=False, name=None)) - known
-        name = ("hourly" if res == "1h" else "five_minute_kanto") + f"_{month}.parquet"
+        name = ("hourly" if res == "1h" else "five_minute_kanto") + f"_{month}.parquet"  # month = 'YYYY-MM_DD-DD'
         df.to_parquet(os.path.join(a.out, name), index=False, compression="zstd", row_group_size=50_000)
         print(f"{name}: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)
     if unknown:
