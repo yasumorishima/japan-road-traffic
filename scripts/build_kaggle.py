@@ -8,12 +8,13 @@ Files are flat (no folders) so the upload does not depend on how Kaggle unpacks 
 failed on monthly files of 1.1 million rows and more and worked up to 900,000 (measured 2026-10-07); ten days
 are at most about 0.6 million rows. The name of a chunk stays the same while its days fill in, so descriptions
 entered on the dataset page carry over to later versions.
-  counters.csv                    one row per counter with location and place names
+  counters.csv                    one row per counter with location and place names, with English prefecture and
+                                  municipality names added (data/municipalities_en.csv)
 
 Derived columns are appended after the source's columns: vehicles per direction and in total (blank when a
 permanent counter flags a fault, because flagged hours are unreliable even when they carry counts), one flag column,
 the weekday, Japanese national holidays (data/holidays_jp.csv, from the Cabinet Office list) and the prefecture."""
-import argparse, calendar, glob, os, re, shutil, sys
+import argparse, calendar, glob, os, re, sys
 import pandas as pd
 
 KEY = {"時間コード": "time_code", "常時観測点コード": "counter_id", "道路種別": "road_type",
@@ -77,6 +78,24 @@ def places(path):
             sys.exit(f"{path}: counter {r.counter_id} {r.sensor}: prefecture {name!r} does not match code {code!r}")
         out[(r.counter_id, r.sensor)] = PREF[code[:2]]
     return out
+
+def counters_en(path, names_path):
+    """counters.csv with prefecture_en after prefecture and municipality_en after municipality."""
+    c = pd.read_csv(path, dtype=str, keep_default_na=False)  # every other column is written back as it was
+    names = pd.read_csv(names_path, dtype=str, keep_default_na=False)
+    en = dict(zip(names.municipality_code, names.municipality_en))
+    missing = sorted(set(c.municipality_code) - set(en) - {""})
+    if missing:
+        sys.exit(f"{names_path} has no English name for {missing[:10]}: rerun scripts/make_municipalities_en.py")
+    pref = {v[0]: v[1] for v in PREF.values()}
+    c.insert(c.columns.get_loc("prefecture") + 1, "prefecture_en", [pref.get(p, "") for p in c.prefecture])
+    c.insert(c.columns.get_loc("municipality") + 1, "municipality_en", [en.get(k, "") for k in c.municipality_code])
+    if ((c.municipality_code != "") & (c.municipality_en == "")).any():
+        sys.exit(f"{names_path}: an empty English name")
+    bad = (c.prefecture != "") & (c.prefecture_en == "")
+    if bad.any():
+        sys.exit(f"{path}: unknown prefecture names {sorted(set(c.prefecture[bad]))}")
+    return c
 
 def holidays(path):
     h = pd.read_csv(path, dtype=str)
@@ -164,6 +183,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("out"); ap.add_argument("--counters", required=True)
     ap.add_argument("--holidays", default=os.path.join(ROOT, "data", "holidays_jp.csv"))
+    ap.add_argument("--names", default=os.path.join(ROOT, "data", "municipalities_en.csv"))
     a = ap.parse_args()
     hol, last_year = holidays(a.holidays)
     groups = {}
@@ -199,7 +219,7 @@ def main():
         print(f"{name}: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)
     if unknown:
         sys.exit(f"{len(unknown)} counters are not in {a.counters} (rebuild it with --from-files): {sorted(unknown)[:10]}")
-    shutil.copyfile(a.counters, os.path.join(a.out, "counters.csv"))
+    counters_en(a.counters, a.names).to_csv(os.path.join(a.out, "counters.csv"), index=False, lineterminator="\n")
 
 if __name__ == "__main__":
     main()

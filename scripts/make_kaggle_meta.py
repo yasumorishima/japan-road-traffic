@@ -89,10 +89,16 @@ COUNTER_COLS = {
     "longitude": "Longitude, WGS84, as given by the source",
     "latitude": "Latitude, WGS84, as given by the source",
     "prefecture": "Prefecture at the location (Japanese), from the GSI reverse geocoder",
+    "prefecture_en": "The same prefecture in English (Hokkaido, Tokyo, Osaka ...)",
     "municipality_code": "Five-digit local government code (全国地方公共団体コード without the check digit) with its "
                          "leading zero (01337); read it as text, e.g. pandas dtype={'municipality_code': str}",
     "municipality": "City, ward, town or village at the location (Japanese)",
-    "town": "Town or district name at the location (Japanese), from the GSI reverse geocoder; can be empty",
+    "municipality_en": "The same municipality in English, e.g. Yokohama-shi Tsurumi-ku, Nanae-cho (-shi city, -ku ward, "
+                       "-cho/-machi town, -mura/-son village): the name from Wikidata's English label without macrons, "
+                       "the type from the official reading in the MIC local government code list. Not unique (two "
+                       "towns can share a name): join on municipality_code",
+    "town": "Town or district name at the location (Japanese only: there is no official reading to romanise), from "
+            "the GSI reverse geocoder; can be empty",
     "in_5min_box": "True when the counter is inside the Kanto box that has five-minute data "
                    "(longitude 138.4-140.95, latitude 34.85-37.2)",
     "last_seen": "Latest day (JST) this counter reported in the API or in the archive",

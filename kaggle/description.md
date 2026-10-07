@@ -12,7 +12,7 @@ Notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffi
 |---|---|
 | `hourly_YYYY-MM_DD-DD.parquet` | Nationwide, hourly, one file per ten days (days 01-10, 11-20, 21 to the end of the month, JST): permanent and CCTV counters |
 | `five_minute_kanto_YYYY-MM_DD-DD.parquet` | Kanto box, every five minutes, one file per ten days, with camera status for CCTV rows |
-| `counters.csv` | One row per counter: location, prefecture, municipality and town, last day seen (read `municipality_code` as text to keep its leading zero) |
+| `counters.csv` | One row per counter: location, prefecture and municipality in Japanese and English (`prefecture_en`, `municipality_en`, e.g. Yokohama-shi Tsurumi-ku), town (Japanese), last day seen (read `municipality_code` as text to keep its leading zero) |
 
 Read a whole resolution at once with `pd.concat(pd.read_parquet(p) for p in sorted(glob.glob(".../hourly_*.parquet")))`.
 
@@ -25,7 +25,7 @@ After the source's own columns, every Parquet file has derived columns, so most 
 | `up_vehicles`, `down_vehicles`, `vehicles` | All vehicles per direction and in both directions, one column for permanent and CCTV counters. **Empty when a permanent counter flags a fault**, so a failed counter's 0 never looks like an empty road |
 | `flagged` | Permanent counters: True when any fault or missing flag is set |
 | `weekday`, `is_holiday` | 0 = Monday; Japanese national and substitute holidays (Cabinet Office list) |
-| `prefecture`, `prefecture_en` | Prefecture of the counter in Japanese and English, without joining `counters.csv` (drop `prefecture` before a join, or you get `prefecture_x` / `prefecture_y`) |
+| `prefecture`, `prefecture_en` | Prefecture of the counter in Japanese and English, without joining `counters.csv` (drop `prefecture` and `prefecture_en` before joining `counters.csv`, or you get `_x` / `_y` columns) |
 
 The key of a row is (`time_jst`, `counter_id`, `sensor`). The same ID can exist as a permanent counter (`loop`) and as a CCTV counter (`cctv`), so join `counters.csv` on both columns.
 
@@ -48,6 +48,6 @@ The key of a row is (`time_jst`, `counter_id`, `sensor`). The same ID can exist 
 
 出典：「交通量 API（国土交通省）機能による交通量(参考値)」を加工して作成（データ提供：公益財団法人日本道路交通情報センター https://www.jartic-open-traffic.org/ ）
 
-Traffic volume data from the MLIT Traffic Volume API (reference values), provided by the Japan Road Traffic Information Center (JARTIC), processed by this dataset. JARTIC states that its terms are compatible with CC BY 4.0. Place names: 出典：国土地理院 (GSI reverse geocoder). Holidays: 出典：内閣府ホームページ「国民の祝日について」 https://www8.cao.go.jp/chosei/shukujitsu/gaiyou.html （公共データ利用規約 第1.0版）を加工して作成 (`is_holiday`). This dataset is not made or endorsed by MLIT, JARTIC, GSI or the Cabinet Office.
+Traffic volume data from the MLIT Traffic Volume API (reference values), provided by the Japan Road Traffic Information Center (JARTIC), processed by this dataset. JARTIC states that its terms are compatible with CC BY 4.0. Place names: 出典：国土地理院 (GSI reverse geocoder). Holidays: 出典：内閣府ホームページ「国民の祝日について」 https://www8.cao.go.jp/chosei/shukujitsu/gaiyou.html （公共データ利用規約 第1.0版）を加工して作成 (`is_holiday`). English municipality names: 出典：「全国地方公共団体コード」（総務省）（https://www.soumu.go.jp/denshijiti/code.html）を加工して作成 (type of municipality), names from Wikidata (CC0). This dataset is not made or endorsed by MLIT, JARTIC, GSI, the Cabinet Office or MIC.
 
 If you use the data, please credit the source as above.

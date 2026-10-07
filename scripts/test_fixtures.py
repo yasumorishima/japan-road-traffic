@@ -175,6 +175,37 @@ with tempfile.TemporaryDirectory() as tmp:
     assert r.returncode == 0, r.stderr
     d = pd.read_parquet(os.path.join(tmp, "out9", "hourly_2026-10_01-10.parquet"))
     assert d.prefecture.isna().all() and d.prefecture_en.isna().all()
+    c9 = pd.read_csv(os.path.join(tmp, "out9", "counters.csv"), dtype=str, keep_default_na=False)
+    assert (c9.prefecture_en == "").all() and (c9.municipality_en == "").all()
+    # English names in the published counters.csv, next to the Japanese ones
+    write_counters(full())
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out11"), "--counters", counters], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    c11 = pd.read_csv(os.path.join(tmp, "out11", "counters.csv"), dtype=str, keep_default_na=False)
+    assert list(c11.columns) == ["counter_id", "sensor", "road_type", "longitude", "latitude", "prefecture", "prefecture_en",
+                                 "municipality_code", "municipality", "municipality_en", "town", "in_5min_box", "last_seen"]
+    assert (c11.prefecture_en == "Kanagawa").all() and (c11.municipality_en == "Yokohama-shi Tsurumi-ku").all()
+    assert (c11.municipality_code == "14101").all() and len(c11) == len(ids)
+    assert c11.drop(columns=["prefecture_en", "municipality_en"]).equals(pd.read_csv(counters, dtype=str, keep_default_na=False))
+    write_counters([[i, s, 3, 139.6, 35.4, "神奈川", "14101", "x", "", True, "2026-10-05"] for i, s in sorted(ids)])
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out13"), "--counters", counters], capture_output=True, text=True)
+    assert r.returncode != 0 and "does not match" in (r.stderr + r.stdout), r.stderr  # not one of the 47: places() stops first
+    write_counters(full())
+    names = os.path.join(tmp, "names.csv")
+    with open(names, "w", encoding="utf-8") as g:
+        g.write("municipality_code,prefecture,municipality,municipality_kana,municipality_en\n01100,北海道,札幌市,サッポロシ,Sapporo-shi\n")
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out12"), "--counters", counters, "--names", names], capture_output=True, text=True)
+    assert r.returncode != 0 and "no English name" in (r.stderr + r.stdout), r.stderr
+    # the committed table: one row per code, every name in the expected shape, known hard cases right
+    mt = pd.read_csv(os.path.join(HERE, "..", "data", "municipalities_en.csv"), dtype=str)
+    assert mt.municipality_code.is_unique and mt.municipality_code.str.fullmatch(r"\d{5}").all()
+    assert mt.municipality_en.str.fullmatch(r"[A-Z][A-Za-z' -]*-(shi|ku|cho|machi|mura|son)").all()
+    known = dict(zip(mt.municipality, mt.municipality_en))
+    for k, v in {"札幌市中央区": "Sapporo-shi Chuo-ku", "豊浦町": "Toyoura-cho", "中之条町": "Nakanojo-machi",
+                 "北谷町": "Chatan-cho", "広尾町": "Hiroo-cho", "千代田区": "Chiyoda-ku", "七飯町": "Nanae-cho"}.items():
+        assert known[k] == v, (k, known[k])
+    cs = pd.read_csv(os.path.join(HERE, "..", "data", "counters.csv"), dtype={"municipality_code": str})
+    assert set(cs.municipality_code.dropna()) <= set(mt.municipality_code)
     # every derived column is described
     r = subprocess.run(meta + [out5, "--settings", settings], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
