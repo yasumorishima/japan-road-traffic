@@ -19,8 +19,6 @@ THEMES = {
                  base="#383835", line="#3987e5"),
 }
 BLUES = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
-PARTS = ["up_small", "up_large", "up_unclassified", "down_small", "down_large", "down_unclassified"]
-FLAGS = [f"{d}_{k}" for d in ("up", "down") for k in ("power_failure", "loop_fault", "ultrasonic_fault", "missing")]
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
@@ -28,13 +26,13 @@ def load(build):
     files = sorted(glob.glob(os.path.join(build, "hourly_*.parquet")))
     if not files:
         sys.exit("no hourly files in the build")
-    cols = ["time_jst", "counter_id", "sensor"] + PARTS + FLAGS
+    # vehicles (derived in build_kaggle.py) is empty for hours a permanent counter flags as faulty or missing
+    cols = ["time_jst", "counter_id", "sensor", "up_large", "down_large", "vehicles"]
     h = pd.concat([pd.read_parquet(p, columns=cols) for p in files], ignore_index=True)
-    h = h[h.sensor == "loop"]
-    h = h[~h[FLAGS].fillna(False).any(axis=1)].copy()
-    h[PARTS] = h[PARTS].astype("float64")
-    h["vehicles"] = h[PARTS].sum(axis=1, min_count=6)
-    return h.dropna(subset=["vehicles"])
+    h = h[(h.sensor == "loop") & h.vehicles.notna()].copy()
+    for c in ("up_large", "down_large", "vehicles"):
+        h[c] = h[c].astype("float64")
+    return h
 
 
 def style(ax, t):

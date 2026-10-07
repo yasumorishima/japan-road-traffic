@@ -8,7 +8,11 @@ Files are flat (no folders) so the upload does not depend on how Kaggle unpacks 
 failed on monthly files of 1.1 million rows and more and worked up to 900,000 (measured 2026-10-07); ten days
 are at most about 0.6 million rows. The name of a chunk stays the same while its days fill in, so descriptions
 entered on the dataset page carry over to later versions.
-  counters.csv                    one row per counter with location and place names"""
+  counters.csv                    one row per counter with location and place names
+
+Derived columns are appended after the source's columns: vehicles per direction and in total (blank when a
+permanent counter flags a fault, because flagged hours are unreliable even when they carry counts), one flag column,
+the weekday, Japanese national holidays (data/holidays_jp.csv, from the Cabinet Office list) and the prefecture."""
 import argparse, calendar, glob, os, re, shutil, sys
 import pandas as pd
 
@@ -44,6 +48,72 @@ FLAGS = ["up_power_failure", "up_loop_fault", "up_ultrasonic_fault", "up_missing
 CODES = ["up_missing_processing", "down_missing_processing"]
 STATUS = [v for v in CCTV_5M.values() if v.startswith("cam_")]
 ORDER = (["time_jst", "counter_id", "sensor", "road_type", "regional_bureau", "sub_region"] + COUNTS + FLAGS + CODES)
+DERIVED = ["up_vehicles", "down_vehicles", "vehicles", "flagged", "weekday", "is_holiday", "prefecture", "prefecture_en"]
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+# JIS X 0401 prefecture codes (the first two digits of the local government code)
+PREF = {"01": ("北海道", "Hokkaido"), "02": ("青森県", "Aomori"), "03": ("岩手県", "Iwate"), "04": ("宮城県", "Miyagi"),
+        "05": ("秋田県", "Akita"), "06": ("山形県", "Yamagata"), "07": ("福島県", "Fukushima"), "08": ("茨城県", "Ibaraki"),
+        "09": ("栃木県", "Tochigi"), "10": ("群馬県", "Gunma"), "11": ("埼玉県", "Saitama"), "12": ("千葉県", "Chiba"),
+        "13": ("東京都", "Tokyo"), "14": ("神奈川県", "Kanagawa"), "15": ("新潟県", "Niigata"), "16": ("富山県", "Toyama"),
+        "17": ("石川県", "Ishikawa"), "18": ("福井県", "Fukui"), "19": ("山梨県", "Yamanashi"), "20": ("長野県", "Nagano"),
+        "21": ("岐阜県", "Gifu"), "22": ("静岡県", "Shizuoka"), "23": ("愛知県", "Aichi"), "24": ("三重県", "Mie"),
+        "25": ("滋賀県", "Shiga"), "26": ("京都府", "Kyoto"), "27": ("大阪府", "Osaka"), "28": ("兵庫県", "Hyogo"),
+        "29": ("奈良県", "Nara"), "30": ("和歌山県", "Wakayama"), "31": ("鳥取県", "Tottori"), "32": ("島根県", "Shimane"),
+        "33": ("岡山県", "Okayama"), "34": ("広島県", "Hiroshima"), "35": ("山口県", "Yamaguchi"), "36": ("徳島県", "Tokushima"),
+        "37": ("香川県", "Kagawa"), "38": ("愛媛県", "Ehime"), "39": ("高知県", "Kochi"), "40": ("福岡県", "Fukuoka"),
+        "41": ("佐賀県", "Saga"), "42": ("長崎県", "Nagasaki"), "43": ("熊本県", "Kumamoto"), "44": ("大分県", "Oita"),
+        "45": ("宮崎県", "Miyazaki"), "46": ("鹿児島県", "Kagoshima"), "47": ("沖縄県", "Okinawa")}
+
+def places(path):
+    """(counter_id, sensor) -> (prefecture, prefecture_en); the Japanese name must agree with the code."""
+    c = pd.read_csv(path, dtype={"municipality_code": str, "prefecture": str})
+    out = {}
+    for r in c.itertuples(index=False):
+        code, name = r.municipality_code, r.prefecture
+        if pd.isna(code) and pd.isna(name):
+            out[(r.counter_id, r.sensor)] = (None, None)  # the reverse geocoder found no municipality (e.g. offshore)
+            continue
+        if pd.isna(code) or code[:2] not in PREF or PREF[code[:2]][0] != name:
+            sys.exit(f"{path}: counter {r.counter_id} {r.sensor}: prefecture {name!r} does not match code {code!r}")
+        out[(r.counter_id, r.sensor)] = PREF[code[:2]]
+    return out
+
+def holidays(path):
+    h = pd.read_csv(path, dtype=str)
+    if list(h.columns) != ["date", "name"] or h.date.duplicated().any():
+        sys.exit(f"{path}: expected unique rows of date,name")
+    days = pd.to_datetime(h.date, format="%Y-%m-%d")
+    return set(days.dt.date), days.max().year
+
+def derive(df, place, hol, last_year):
+    """Append DERIVED to one chunk. Vehicles: permanent counters sum small + large + unclassified when all three are
+    given and none of that direction's four flags is True or unknown; CCTV counters take the source's total."""
+    loop = (df.sensor == "loop").to_numpy()
+    for d in ("up", "down"):
+        fl = df[[f"{d}_{k}" for k in ("power_failure", "loop_fault", "ultrasonic_fault", "missing")]]
+        clean = fl.eq(False).fillna(False).all(axis=1).to_numpy()  # all four known and False (all() skips a blank)
+        parts = df[[f"{d}_small", f"{d}_large", f"{d}_unclassified"]].astype("float64")
+        s = parts.sum(axis=1, min_count=3).to_numpy()
+        v = pd.Series(df[f"{d}_total"].astype("float64").to_numpy(), index=df.index)
+        v[loop] = s[loop]
+        v[loop & ~clean] = float("nan")
+        df[f"{d}_vehicles"] = v.round().astype("Int32")
+    df["vehicles"] = (df.up_vehicles + df.down_vehicles).astype("Int32")
+    f = df[FLAGS]
+    flagged = pd.array([None] * len(df), "boolean")
+    flagged[f.eq(True).any(axis=1).to_numpy() & loop] = True
+    flagged[f.eq(False).fillna(False).all(axis=1).to_numpy() & loop] = False
+    df["flagged"] = flagged
+    if df.time_jst.dt.year.max() > last_year:
+        sys.exit(f"data reaches {df.time_jst.max():%Y-%m-%d} but the holiday list ends in {last_year}: "
+                 f"add the next year to data/holidays_jp.csv from the Cabinet Office list")
+    df["weekday"] = df.time_jst.dt.dayofweek.astype("int8")
+    df["is_holiday"] = df.time_jst.dt.date.isin(hol).astype("bool")
+    keys = pd.MultiIndex.from_arrays([df.counter_id, df.sensor])
+    pr = [place[k] for k in keys]
+    df["prefecture"] = pd.array([p[0] for p in pr], "string")
+    df["prefecture_en"] = pd.array([p[1] for p in pr], "string")
+    return df
 
 def read(path, sensor, res):
     raw = pd.read_csv(path, dtype=str, keep_default_na=False)
@@ -93,7 +163,9 @@ def chunk(day):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("out"); ap.add_argument("--counters", required=True)
+    ap.add_argument("--holidays", default=os.path.join(ROOT, "data", "holidays_jp.csv"))
     a = ap.parse_args()
+    hol, last_year = holidays(a.holidays)
     groups = {}
     for p in glob.glob(os.path.join(a.src, "**", "*.csv.gz"), recursive=True):
         m = NAME.match(os.path.basename(p))
@@ -103,7 +175,8 @@ def main():
     if not groups:
         sys.exit("no release files found")
     os.makedirs(a.out, exist_ok=True)
-    known = set(pd.read_csv(a.counters, usecols=["counter_id", "sensor"]).itertuples(index=False, name=None))
+    place = places(a.counters)
+    known = set(place)
     unknown = set()
     for (res, month), files in sorted(groups.items()):
         parts = [read(p, s, res) for p, s in sorted(files)]
@@ -116,7 +189,11 @@ def main():
         dup = df.duplicated(["time_jst", "counter_id", "sensor"]).sum()
         if dup:
             sys.exit(f"{res} {month}: {dup} duplicated (time, counter, sensor) rows")
-        unknown |= set(df[["counter_id", "sensor"]].drop_duplicates().itertuples(index=False, name=None)) - known
+        new = set(df[["counter_id", "sensor"]].drop_duplicates().itertuples(index=False, name=None)) - known
+        if new:
+            unknown |= new
+            continue
+        df = derive(df, place, hol, last_year)
         name = ("hourly" if res == "1h" else "five_minute_kanto") + f"_{month}.parquet"  # month = 'YYYY-MM_DD-DD'
         df.to_parquet(os.path.join(a.out, name), index=False, compression="zstd", row_group_size=50_000)
         print(f"{name}: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)

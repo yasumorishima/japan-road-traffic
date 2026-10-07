@@ -89,7 +89,93 @@ with tempfile.TemporaryDirectory() as tmp:
     assert r.returncode != 0 and "without a description" in (r.stderr + r.stdout), r.stderr
     # 4. a counter missing from counters.csv fails the build
     with open(counters, "w", newline="", encoding="utf-8") as g:
-        w = csv.writer(g); w.writerow(["counter_id", "sensor"]); w.writerows(sorted(ids)[1:])  # build_kaggle reads only these two
+        w = csv.writer(g); w.writerow(HEADER)
+        w.writerows([[i, s, 3, 139.6, 35.4, "神奈川県", "14101", "横浜市鶴見区", "", True, "2026-10-05"] for i, s in sorted(ids)[1:]])
     r = subprocess.run(build[:3] + [out + "2", "--counters", counters], capture_output=True, text=True)
     assert r.returncode != 0 and "not in" in (r.stderr + r.stdout), r.stderr
+
+    # 5. derived columns, recomputed here from the source's columns
+    def write_counters(rows):
+        with open(counters, "w", newline="", encoding="utf-8") as g:
+            w = csv.writer(g); w.writerow(HEADER); w.writerows(rows)
+    def full(pref="神奈川県", code="14101"):
+        return [[i, s, 3, 139.6, 35.4, pref, code, "x", "", True, "2026-10-05"] for i, s in sorted(ids)]
+    # a flagged permanent-counter hour that still carries counts must get no vehicles
+    src5 = os.path.join(tmp, "in5"); os.makedirs(src5)
+    for layer, recs in FIX.items():
+        rows = [fetch.row(layer, f) for f in recs]
+        if layer == "t_travospublic_measure_1h":
+            cols = fetch.columns(layer)
+            j, k = cols.index("下り・ループ異常"), cols.index("下り・小型交通量")
+            assert rows[0][k] not in ("", None)
+            rows[0][j] = "1"
+            rows[0][cols.index("上り・車種判別不能交通量")] = ""  # one of three parts blank: no up total
+            flagged_id = recs[0]["properties"]["常時観測点コード"]
+        if layer == "t_travospublic_measure_5m":
+            cols = fetch.columns(layer)
+            assert rows[0][cols.index("上り・小型交通量")] not in ("", None)
+            rows[0][cols.index("上り・欠測")] = ""  # a flag the source left blank: not known to be clean
+            unknown_id = recs[0]["properties"]["常時観測点コード"]
+        fetch.write_csv(os.path.join(src5, f"{ASSET[layer]}_road3_20261005.csv.gz"), rows, layer)
+    hol = os.path.join(tmp, "hol.csv")
+    with open(hol, "w", encoding="utf-8") as g:
+        g.write("date,name\n2026-10-05,test\n2027-01-01,元日\n")
+    write_counters(full())
+    out5 = os.path.join(tmp, "out5")
+    r = subprocess.run(build[:2] + [src5, out5, "--counters", counters, "--holidays", hol], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    for name in ("hourly_2026-10_01-10.parquet", "five_minute_kanto_2026-10_01-10.parquet"):
+        d = pd.read_parquet(os.path.join(out5, name))
+        five = name.startswith("five")
+        assert list(d.columns) == build_kaggle.ORDER + (build_kaggle.STATUS if five else []) + build_kaggle.DERIVED, name
+        loop = d.sensor == "loop"
+        for side in ("up", "down"):
+            fl = d[[f"{side}_{x}" for x in ("power_failure", "loop_fault", "ultrasonic_fault", "missing")]]
+            parts = d[[f"{side}_small", f"{side}_large", f"{side}_unclassified"]].astype("float64").sum(axis=1, min_count=3)
+            want = parts.where(loop & fl.notna().all(axis=1) & ~fl.fillna(True).any(axis=1), float("nan")).where(loop, d[f"{side}_total"].astype("float64"))
+            got = d[f"{side}_vehicles"].astype("float64")
+            assert ((want == got) | (want.isna() & got.isna())).all(), (name, side)
+        both = d.up_vehicles.astype("float64") + d.down_vehicles.astype("float64")
+        assert ((both == d.vehicles.astype("float64")) | (both.isna() & d.vehicles.isna())).all(), name
+        assert d.vehicles.notna().any() and d.loc[~loop, "vehicles"].notna().any(), name  # CCTV totals reach it
+        F8 = d.loc[loop, [c for c in d if c.endswith(("_power_failure", "_loop_fault", "_ultrasonic_fault", "_missing"))]]
+        assert F8.shape[1] == 8 and d.flagged[~loop].isna().all()
+        anyf = F8.fillna(False).any(axis=1)
+        exp = [True if x else (False if k else None) for x, k in zip(anyf, F8.notna().all(axis=1))]
+        assert exp == [None if pd.isna(x) else bool(x) for x in d.flagged[loop]], name
+        assert (d.weekday == 0).all() and d.is_holiday.all(), name  # 2026-10-05 is a Monday, a holiday in hol.csv
+        assert (d.prefecture == "神奈川県").all() and (d.prefecture_en == "Kanagawa").all(), name
+    row = pd.read_parquet(os.path.join(out5, "hourly_2026-10_01-10.parquet")).query("sensor == 'loop' and counter_id == @flagged_id")
+    assert len(row) == 1 and bool(row.flagged.iloc[0]) and pd.isna(row.down_vehicles.iloc[0]) and pd.isna(row.vehicles.iloc[0])
+    assert pd.isna(row.up_vehicles.iloc[0]) and pd.notna(row.up_small.iloc[0]) and pd.notna(row.down_small.iloc[0])  # raw counts stay
+    row = pd.read_parquet(os.path.join(out5, "five_minute_kanto_2026-10_01-10.parquet")).query("sensor == 'loop' and counter_id == @unknown_id")
+    assert len(row) >= 1 and row.up_vehicles.isna().all() and row.down_vehicles.notna().all() and row.flagged.isna().all()
+    # the real holiday list: 2026-10-05 is not a holiday; build_kaggle reads data/holidays_jp.csv by default
+    real = os.path.join(tmp, "out6")
+    r = subprocess.run(build[:3] + [real, "--counters", counters], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert not pd.read_parquet(os.path.join(real, "hourly_2026-10_01-10.parquet")).is_holiday.any()
+    hl = pd.read_csv(os.path.join(HERE, "..", "data", "holidays_jp.csv"), dtype=str)
+    assert {"2026-07-20", "2026-08-11", "2026-09-21", "2026-09-22", "2026-09-23", "2026-10-12"} <= set(hl.date)
+    # a list whose last year is the data's year passes; one that ends before the data stops the build
+    with open(hol, "w", encoding="utf-8") as g:
+        g.write("date,name\n2026-01-01,元日\n")
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out10"), "--counters", counters, "--holidays", hol], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    with open(hol, "w", encoding="utf-8") as g:
+        g.write("date,name\n2025-01-01,元日\n")
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out7"), "--counters", counters, "--holidays", hol], capture_output=True, text=True)
+    assert r.returncode != 0 and "holiday list ends" in (r.stderr + r.stdout), r.stderr
+    # a prefecture name that disagrees with its code stops the build; no municipality at all gives empty names
+    write_counters(full(code="13101"))
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out8"), "--counters", counters], capture_output=True, text=True)
+    assert r.returncode != 0 and "does not match" in (r.stderr + r.stdout), r.stderr
+    write_counters(full(pref="", code=""))
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out9"), "--counters", counters], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    d = pd.read_parquet(os.path.join(tmp, "out9", "hourly_2026-10_01-10.parquet"))
+    assert d.prefecture.isna().all() and d.prefecture_en.isna().all()
+    # every derived column is described
+    r = subprocess.run(meta + [out5, "--settings", settings], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
 print("test_fixtures: ALL PASS")

@@ -61,6 +61,27 @@ CAM = {
 }
 for k, v in CAM.items():
     COLS[k] = f"Five-minute CCTV rows only: True = {v}, False = normal, empty = could not be judged or not a CCTV row"
+# derived columns (added by build_kaggle.py after the source's columns)
+for d in ("up", "down"):
+    COLS[f"{d}_vehicles"] = (f"Derived: all vehicles in the interval, {DIR[d]}, one column for both sensors. Permanent "
+                             f"counters: {d}_small + {d}_large + {d}_unclassified, left empty when any of the four "
+                             f"{d}_* fault/missing flags is set (a failed counter reports 0 or partial counts with a "
+                             f"flag). CCTV counters: {d}_total as given (hourly CCTV rows with {d}_missing_processing = 1 can rest on "
+                             f"incomplete five-minute data). Empty when the source gives no count")
+COLS |= {
+    "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction "
+                "only and report 0 for the other",
+    "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is "
+               "set, False when none is; empty for CCTV rows",
+    "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+    "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the "
+                  "Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+    "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few "
+                  "counters with no municipality in counters.csv (none found, or not resolved yet). Joining "
+                  "counters.csv gives prefecture_x / prefecture_y: drop one first",
+    "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture "
+                     "code in counters.csv municipality_code",
+}
 COUNTER_COLS = {
     "counter_id": "Counter ID (常時観測点コード)",
     "sensor": "loop = permanent counter, cctv = AI count on CCTV images; (counter_id, sensor) is the key",

@@ -55,7 +55,15 @@
         "cam_decode_status": "Five-minute CCTV rows only: True = video decoding failed (映像のデコード処理), False = normal, empty = could not be judged or not a CCTV row",
         "cam_import_failure": "Five-minute CCTV rows only: True = decoded video could not be passed to the analyser (取込加工処理の失敗), False = normal, empty = could not be judged or not a CCTV row",
         "cam_analyzer_freeze": "Five-minute CCTV rows only: True = the image analyser froze (映像解析機能のフリーズ), False = normal, empty = could not be judged or not a CCTV row",
-        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row"
+        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "five_minute_kanto_2026-09_11-20.parquet": {
@@ -94,7 +102,15 @@
         "cam_decode_status": "Five-minute CCTV rows only: True = video decoding failed (映像のデコード処理), False = normal, empty = could not be judged or not a CCTV row",
         "cam_import_failure": "Five-minute CCTV rows only: True = decoded video could not be passed to the analyser (取込加工処理の失敗), False = normal, empty = could not be judged or not a CCTV row",
         "cam_analyzer_freeze": "Five-minute CCTV rows only: True = the image analyser froze (映像解析機能のフリーズ), False = normal, empty = could not be judged or not a CCTV row",
-        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row"
+        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "five_minute_kanto_2026-09_21-30.parquet": {
@@ -133,7 +149,15 @@
         "cam_decode_status": "Five-minute CCTV rows only: True = video decoding failed (映像のデコード処理), False = normal, empty = could not be judged or not a CCTV row",
         "cam_import_failure": "Five-minute CCTV rows only: True = decoded video could not be passed to the analyser (取込加工処理の失敗), False = normal, empty = could not be judged or not a CCTV row",
         "cam_analyzer_freeze": "Five-minute CCTV rows only: True = the image analyser froze (映像解析機能のフリーズ), False = normal, empty = could not be judged or not a CCTV row",
-        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row"
+        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "five_minute_kanto_2026-10_01-10.parquet": {
@@ -172,7 +196,15 @@
         "cam_decode_status": "Five-minute CCTV rows only: True = video decoding failed (映像のデコード処理), False = normal, empty = could not be judged or not a CCTV row",
         "cam_import_failure": "Five-minute CCTV rows only: True = decoded video could not be passed to the analyser (取込加工処理の失敗), False = normal, empty = could not be judged or not a CCTV row",
         "cam_analyzer_freeze": "Five-minute CCTV rows only: True = the image analyser froze (映像解析機能のフリーズ), False = normal, empty = could not be judged or not a CCTV row",
-        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row"
+        "cam_other_error": "Five-minute CCTV rows only: True = other error (その他エラー), False = normal, empty = could not be judged or not a CCTV row",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-07_01-10.parquet": {
@@ -201,7 +233,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-07_11-20.parquet": {
@@ -230,7 +270,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-07_21-31.parquet": {
@@ -259,7 +307,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-08_01-10.parquet": {
@@ -288,7 +344,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-08_11-20.parquet": {
@@ -317,7 +381,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-08_21-31.parquet": {
@@ -346,7 +418,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-09_01-10.parquet": {
@@ -375,7 +455,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-09_11-20.parquet": {
@@ -404,7 +492,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-09_21-30.parquet": {
@@ -433,7 +529,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     },
     "hourly_2026-10_01-10.parquet": {
@@ -462,7 +566,15 @@
         "down_ultrasonic_fault": "Permanent counters: True when the source flags an ultrasonic detector fault, the 'down' direction (下り); empty for CCTV",
         "down_missing": "Permanent counters: True when the source flags the value as missing (欠測), the 'down' direction (下り); empty for CCTV",
         "up_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'up' direction (上り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
-        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code"
+        "down_missing_processing": "Hourly CCTV only: the source's 5分欠測処理フラグ, the 'down' direction (下り). The API specification defines 1 = five-minute processing and 2 = one hour; 0 also occurs and is not defined there. Kept as the integer code",
+        "up_vehicles": "Derived: all vehicles in the interval, the 'up' direction (上り), one column for both sensors. Permanent counters: up_small + up_large + up_unclassified, left empty when any of the four up_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: up_total as given (hourly CCTV rows with up_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "down_vehicles": "Derived: all vehicles in the interval, the 'down' direction (下り), one column for both sensors. Permanent counters: down_small + down_large + down_unclassified, left empty when any of the four down_* fault/missing flags is set (a failed counter reports 0 or partial counts with a flag). CCTV counters: down_total as given (hourly CCTV rows with down_missing_processing = 1 can rest on incomplete five-minute data). Empty when the source gives no count",
+        "vehicles": "Derived: up_vehicles + down_vehicles; empty when either is empty. Some counters count one direction only and report 0 for the other",
+        "flagged": "Derived, permanent counters only: True when any of the eight fault/missing flags (both directions) is set, False when none is; empty for CCTV rows",
+        "weekday": "Derived: day of the week of time_jst, 0 = Monday ... 6 = Sunday",
+        "is_holiday": "Derived: True on Japanese national holidays and substitute holidays (国民の祝日・休日), from the Cabinet Office list (内閣府「国民の祝日」CSV). Weekends are not marked; use weekday",
+        "prefecture": "Derived from counters.csv: prefecture at the counter's location (Japanese); empty for the few counters with no municipality in counters.csv (none found, or not resolved yet). Joining counters.csv gives prefecture_x / prefecture_y: drop one first",
+        "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture code in counters.csv municipality_code"
       }
     }
   }
