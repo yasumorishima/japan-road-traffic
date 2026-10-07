@@ -85,6 +85,20 @@ jobs:
           python scripts/make_kaggle_meta.py _build
           ls -la _build
 
+      # README figures are redrawn when a new ten-day file starts (JST days 01, 11, 21), on a manual run, or
+      # when they do not exist yet; redrawing them daily would grow the repository by every image every day.
+      - name: Draw the README figures
+        if: env.CHANGED == 'true' || inputs.publish
+        run: |
+          pip install --quiet matplotlib pillow
+          d=$(TZ=Asia/Tokyo date +%d)
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ ! -f docs/figures/vs_usual_light.png ] || [[ "$d" =~ ^(01|11|21)$ ]]; then
+            python scripts/figures.py _build docs/figures
+            latest=$(ls _build/hourly_*.parquet | sort | tail -1)
+            python scripts/cover.py "$latest" _build/counters.csv docs/figures/map.jpg
+            echo "FIGURES=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Publish a Kaggle version
         if: >-
           inputs.publish ||
@@ -126,7 +140,8 @@ jobs:
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git add data/counters.csv data/geocode_cache.json kaggle/settings.json
           if [ "$PUBLISHED" = "true" ]; then git add data/published_assets.txt; fi
+          if [ "$FIGURES" = "true" ]; then git add docs/figures; fi
           if git diff --cached --quiet; then echo "Nothing to commit."; exit 0; fi
-          git commit -m "Update counters and Kaggle metadata"
+          git commit -m "Update counters, Kaggle metadata and figures"
           git pull --rebase --quiet
           git push

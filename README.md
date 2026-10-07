@@ -7,6 +7,37 @@ Vehicle counts from the traffic counters of Japan's Ministry of Land, Infrastruc
 
 The source API only keeps **5-minute values for about one month and hourly values for about three months**. Older values are gone from the source, so this archive is the only place they remain.
 
+**Kaggle**: [Japan Road Traffic Volume (Hourly Archive)](https://www.kaggle.com/datasets/yasunorim/japan-road-traffic-volume) (Parquet, updated daily) · notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffic-a-first-look)
+
+## What the data shows
+
+The figures below are drawn from the archive by `scripts/figures.py` and `scripts/cover.py` and redrawn every ten days. They use permanent counters only and drop rows the source flags as faulty or missing.
+
+<img src="docs/figures/map.jpg" alt="Map of Japan drawn by the traffic counters: one point of light per counter, brighter where more vehicles passed that day">
+
+Every counter on one day, as a point of light at its location: the national highway network appears by itself.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/weekday_hour_dark.png">
+  <img src="docs/figures/weekday_hour_light.png" alt="Heatmap of mean vehicles per hour by weekday and hour">
+</picture>
+
+Weekdays peak in the morning and evening rush; weekends spread over the middle of the day.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/large_share_dark.png">
+  <img src="docs/figures/large_share_light.png" alt="Line chart of the share of large vehicles by hour">
+</picture>
+
+Large vehicles make up a much larger share of traffic at night.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/vs_usual_dark.png">
+  <img src="docs/figures/vs_usual_light.png" alt="Line chart of nationwide traffic relative to the usual level for the same weekday, with holiday peaks labelled">
+</picture>
+
+Each day compared with the same weekday at the same counter: holiday periods rise well above the usual level.
+
 ## Why this exists
 
 Japan's Ministry of Land, Infrastructure, Transport and Tourism (MLIT) opened this API in May 2025, but it is a rolling window. There is no long history to study weekday patterns, holidays (Golden Week, Obon, New Year), weather, or events. This repository collects every day so that history builds up.
@@ -48,6 +79,7 @@ Files collected before 2026-10-06 (commit `906b6d6`) used the permanent-counter 
 
 - These are counts, not speeds. Congestion has to be inferred, for example by comparing a count with the same weekday and hour.
 - The values are reference values, not official MLIT traffic survey results. Some counters are unpublished at times because of faults.
+- A permanent counter that fails reports 0 vehicles with a fault or missing flag (in the archive through 2026-10-05, 11,782 of the 17,652 zero-count rows carry a flag; one counter reads 0 with every hour flagged from late July). Drop flagged rows before using the counts.
 - The API does not give road names, and route numbers are not added here: the only route-name sources found were non-commercial (National Land Numerical Information, emergency transport roads) or share-alike (OpenStreetMap). Place names come from the location.
 
 ## How it is collected
