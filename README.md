@@ -9,6 +9,8 @@ The source API only keeps **5-minute values for about one month and hourly value
 
 **Kaggle**: [Japan Road Traffic Volume (Hourly Archive)](https://www.kaggle.com/datasets/yasunorim/japan-road-traffic-volume) (Parquet, updated daily) · notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffic-a-first-look)
 
+The Kaggle files are ready to use: `vehicles` per row for both kinds of counter (empty for hours a counter flags as faulty), `weekday`, `is_holiday` (Japanese national holidays), and prefecture and municipality names in English as well as Japanese (`prefecture_en`; `municipality_en` in `counters.csv`, e.g. Yokohama-shi Tsurumi-ku).
+
 ## What the data shows
 
 The figures below are drawn from the archive by `scripts/figures.py` and `scripts/cover.py` and redrawn every ten days. They use permanent counters only and drop rows the source flags as faulty or missing.
@@ -79,7 +81,7 @@ Files collected before 2026-10-06 (commit `906b6d6`) used the permanent-counter 
 
 - These are counts, not speeds. Congestion has to be inferred, for example by comparing a count with the same weekday and hour.
 - The values are reference values, not official MLIT traffic survey results. Some counters are unpublished at times because of faults.
-- A permanent counter that fails reports 0 vehicles with a fault or missing flag (in the archive through 2026-10-05, 11,782 of the 17,652 zero-count rows carry a flag; one counter reads 0 with every hour flagged from late July). Drop flagged rows before using the counts.
+- A permanent counter that fails reports 0 vehicles with a fault or missing flag (in the archive through 2026-10-05, 11,782 of the 17,652 zero-count rows carry a flag; one counter reads 0 with every hour flagged from late July). Drop flagged rows before using the counts (in the Kaggle files, `vehicles` is already empty for them).
 - The API does not give road names, and route numbers are not added here: the only route-name sources found were non-commercial (National Land Numerical Information, emergency transport roads) or share-alike (OpenStreetMap). Place names come from the location.
 
 ## How it is collected
