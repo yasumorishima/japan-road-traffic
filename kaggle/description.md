@@ -13,6 +13,7 @@ Notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffi
 | `hourly_YYYY-MM_DD-DD.parquet` | Nationwide, hourly, one file per ten days (days 01-10, 11-20, 21 to the end of the month, JST): permanent and CCTV counters |
 | `five_minute_kanto_YYYY-MM_DD-DD.parquet` | Kanto box, every five minutes, one file per ten days, with camera status for CCTV rows |
 | `counters.csv` | One row per counter: location, prefecture and municipality in Japanese and English (`prefecture_en`, `municipality_en`, e.g. Yokohama-shi Tsurumi-ku), town (Japanese), last day seen (read `municipality_code` as text to keep its leading zero) |
+| `census_2021_counters.csv` | 365 permanent counters on national highways tied to their section of the 2021 Road Traffic Census: route name (Japanese and English, e.g. National Route 5), lanes, speed limit, and 2021 rush-hour and off-peak travel speeds per direction. The tie is inferred (see the `match_` columns); the speeds are 2021 values, not live ones |
 
 Read a whole resolution at once with `pd.concat(pd.read_parquet(p) for p in sorted(glob.glob(".../hourly_*.parquet")))`.
 
@@ -37,17 +38,17 @@ The key of a row is (`time_jst`, `counter_id`, `sensor`). The same ID can exist 
 
 ## Things to know before using it
 
-- **These are counts, not speeds.** No open source of speed or congestion length could be redistributed; congestion has to be inferred, for example from counts well above the usual level for that hour.
+- **These are counts, not speeds.** No open source of live speed or congestion length could be redistributed; congestion has to be inferred, for example from counts well above the usual level for that hour. `census_2021_counters.csv` gives a static 2021 travel speed for 365 counters.
 - **CCTV counts are often empty.** The source blanks them when the camera is off its preset position, and some are empty for other reasons. Permanent-counter rows are almost always filled, but **a permanent counter that fails reports 0 vehicles with a fault or missing flag** (`*_power_failure`, `*_loop_fault`, `*_ultrasonic_fault`, `*_missing`): use `vehicles` (empty for flagged hours) or drop flagged rows before using the raw counts. Flagged hours that still carry counts are unreliable too. For permanent counters the total is small + large + unclassified; CCTV counters give the total directly (`*_total`).
 - **The source lacks a few time codes on many days** (for example 287 of 288 five-minute codes; asking again returns nothing). A day is archived when at most 5% of its codes are missing; a day with a larger gap is retried and kept as it is only when it is about to leave the source window. A missing hour means the source has no value for it.
 - The values are reference values, not official MLIT traffic survey results. Counters can be unpublished at times because of faults.
-- There are no road names or route numbers: the API gives none, and the route sources found were non-commercial or share-alike. Place names come from the counter location.
+- The API gives no road names or route numbers. Route names come only from the 2021 census, for the 365 counters in `census_2021_counters.csv`; the other route sources found were non-commercial or share-alike. Place names come from the counter location.
 - Times are Japan Standard Time (UTC+9).
 
 ## Source and terms
 
 出典：「交通量 API（国土交通省）機能による交通量(参考値)」を加工して作成（データ提供：公益財団法人日本道路交通情報センター https://www.jartic-open-traffic.org/ ）
 
-Traffic volume data from the MLIT Traffic Volume API (reference values), provided by the Japan Road Traffic Information Center (JARTIC), processed by this dataset. JARTIC states that its terms are compatible with CC BY 4.0. Place names: 出典：国土地理院 (GSI reverse geocoder). Holidays: 出典：内閣府ホームページ「国民の祝日について」 https://www8.cao.go.jp/chosei/shukujitsu/gaiyou.html （公共データ利用規約 第1.0版）を加工して作成 (`is_holiday`). English municipality names: 出典：「全国地方公共団体コード」（総務省）（https://www.soumu.go.jp/denshijiti/code.html）を加工して作成 (type of municipality), names from Wikidata (CC0). This dataset is not made or endorsed by MLIT, JARTIC, GSI, the Cabinet Office or MIC.
+Traffic volume data from the MLIT Traffic Volume API (reference values), provided by the Japan Road Traffic Information Center (JARTIC), processed by this dataset. JARTIC states that its terms are compatible with CC BY 4.0. Place names: 出典：国土地理院 (GSI reverse geocoder). Holidays: 出典：内閣府ホームページ「国民の祝日について」 https://www8.cao.go.jp/chosei/shukujitsu/gaiyou.html （公共データ利用規約 第1.0版）を加工して作成 (`is_holiday`). English municipality names: 出典：「全国地方公共団体コード」（総務省）（https://www.soumu.go.jp/denshijiti/code.html）を加工して作成 (type of municipality), names from Wikidata (CC0). Road Traffic Census (`census_2021_counters.csv`): 出典：「令和3年度全国道路・街路交通情勢調査（道路交通センサス）一般交通量調査 箇所別基本表」（国土交通省）（https://www.mlit.go.jp/road/census/r3/index.html）を加工して作成 (公共データ利用規約 第1.0版); the tie between counters and census sections is made by this dataset, with observation addresses located by the GSI address search (出典：国土地理院). This dataset is not made or endorsed by MLIT, JARTIC, GSI, the Cabinet Office or MIC.
 
 If you use the data, please credit the source as above.

@@ -10,11 +10,13 @@ are at most about 0.6 million rows. The name of a chunk stays the same while its
 entered on the dataset page carry over to later versions.
   counters.csv                    one row per counter with location and place names, with English prefecture and
                                   municipality names added (data/municipalities_en.csv)
+  census_2021_counters.csv        365 loop counters tied to their 2021 Road Traffic Census section (route, lanes, speed
+                                  limit, 2021 travel speeds), copied from data/ (made by scripts/census/)
 
 Derived columns are appended after the source's columns: vehicles per direction and in total (blank when a
 permanent counter flags a fault, because flagged hours are unreliable even when they carry counts), one flag column,
 the weekday, Japanese national holidays (data/holidays_jp.csv, from the Cabinet Office list) and the prefecture."""
-import argparse, calendar, glob, os, re, sys
+import argparse, calendar, glob, os, re, shutil, sys
 import pandas as pd
 
 KEY = {"時間コード": "time_code", "常時観測点コード": "counter_id", "道路種別": "road_type",
@@ -220,6 +222,7 @@ def main():
     if unknown:
         sys.exit(f"{len(unknown)} counters are not in {a.counters} (rebuild it with --from-files): {sorted(unknown)[:10]}")
     counters_en(a.counters, a.names).to_csv(os.path.join(a.out, "counters.csv"), index=False, lineterminator="\n")
+    shutil.copy(os.path.join(ROOT, "data", "census_2021_counters.csv"), a.out)
 
 if __name__ == "__main__":
     main()
