@@ -104,11 +104,11 @@ To study traffic against rain, snow and temperature, hourly observations of ever
 | `obs_time_jst` | observation time, JST, `YYYYMMDDhhmm` |
 | `hour_start_jst` | `obs_time_jst` minus one hour: the hour that hourly amounts cover, matching `時間コード` / `time_jst` of the traffic files |
 | `station_id` | AMeDAS station number (joins the station table) |
-| `temp_c`, `humidity_pct`, `wind_ms`, `wind_dir16` (0 = calm, 1 = NNE … 16 = N), `pressure_hpa`, `sea_level_pressure_hpa`, `visibility_m`, `weather_code`, `snow_depth_cm` | readings at the observation time |
+| `temp_c`, `humidity_pct`, `wind_ms`, `wind_dir16` (16-point compass direction as coded by the JMA site; 0 when the wind is calm), `pressure_hpa`, `sea_level_pressure_hpa`, `visibility_m`, `weather_code`, `snow_depth_cm` | readings at the observation time |
 | `precip_10m_mm`, `precip_1h_mm`, `precip_3h_mm`, `precip_24h_mm`, `sun_10m_min`, `sun_1h_h`, `snow_1h_cm` … `snow_24h_cm` | amounts over the period ending at the observation time |
 | `<column>_aqc` | JMA quality flag of the value; 0 is normal |
 
-Each station measures only some elements: an element it does not measure is blank, except the snowfall amounts (`snow_1h_cm` …), which the source fills with 0 and a blank flag at stations without a snow gauge, so read them only where the flag is set.
+Each station measures only some elements: an element it does not measure is blank, except the snowfall amounts (`snow_1h_cm` …), which the source fills with 0 and a blank flag at stations without a snow gauge, so read them only where the flag is 0 (stations with a gauge carried flag 6 in early October, outside the snow season).
 
 ## Caveats
 
@@ -121,7 +121,7 @@ Each station measures only some elements: an element it does not measure is blan
 
 `.github/workflows/collect.yml` runs three times a day. `scripts/collect.py` lists the days the source still holds but the releases do not have, fetches them one request at a time with a pause between requests, and uploads a file when every time code of the day is present (24 hourly or 288 five-minute codes). The source itself lacks a few time codes on many days (for example 287 of 288 five-minute codes; asking again returns nothing), so a day older than yesterday with at most 5% of its codes missing is uploaded as it is. A time code with far fewer counters than the rest of the day counts as missing. A day with a larger gap is retried, and kept as it is only when it is about to leave the source window and still has rows; days about to leave the source are fetched first, then the newest days. A missing time code means the source has no value for it. A missed run is recovered by the next one while the day is still in the source window.
 
-`.github/workflows/collect-weather.yml` runs `scripts/amedas.py` three times a day, separately from the traffic collector: it uploads a day when all 24 hourly maps are served, retries a day with a missing map, and keeps a day as it is (never empty) once it is about to leave the 9-day window.
+`.github/workflows/collect-weather.yml` runs `scripts/amedas.py` three times a day, separately from the traffic collector: it uploads a day when all 24 hourly maps are served, retries a day with a missing map (or a map with far fewer stations than the rest of the day), and keeps a day as it is (never empty) once it is the oldest day of the 9-day window. A day once uploaded is not filled in later. A failing day does not stop the run from fetching the other days.
 
 ## Kaggle dataset
 
@@ -134,6 +134,6 @@ Each station measures only some elements: an element it does not measure is blan
 
 Traffic volume data from the MLIT Traffic Volume API (reference values), provided by the Japan Road Traffic Information Center (JARTIC), processed by this repository. The JARTIC terms state compatibility with CC BY 4.0. This archive is not made or endorsed by MLIT or JARTIC.
 
-Weather: 出典：気象庁ホームページ（https://www.jma.go.jp/bosai/amedas/）のアメダス観測値を加工して作成. Observations from the Japan Meteorological Agency website, used under the JMA website terms (Public Data License 1.0, compatible with CC BY 4.0). Only observations are stored; no forecast or warning is redistributed.
+Weather: 出典：気象庁ホームページ（https://www.jma.go.jp/bosai/amedas/）のアメダス観測値を加工して作成. Observations from the Japan Meteorological Agency website, used under the JMA website terms (Public Data License 1.0, compatible with CC BY 4.0). Only observations are stored; no forecast or warning is redistributed. This archive is not made or endorsed by JMA.
 
 Code: MIT License.

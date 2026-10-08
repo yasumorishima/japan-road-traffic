@@ -2,7 +2,7 @@
 the release `amedas-YYYYMM` (plus the station table once per month, `amedas_stations_YYYYMM.csv.gz`).
 
 The JMA site (https://www.jma.go.jp/bosai/amedas/) keeps its 10-minute station maps for only about 9 days
-(measured 2026-10-08: 09-28 12:00 still served, 09-27 gone), so this runs three times a day and fetches every
+(measured 2026-10-08 12:25 JST: 09-29 02:00-08:00 already gone, 09-29 09:00 on still served), so this runs three times a day and fetches every
 day the release does not have yet. Only observations are stored; no forecast or warning is redistributed.
 Terms: JMA website terms of use, compatible with CC BY 4.0 (Public Data License 1.0); credit "Japan
 Meteorological Agency".
@@ -12,9 +12,11 @@ Day D holds the 24 hourly maps from D 01:00 to D+1 00:00. Each value of the map 
 observation time minus one hour) lines up with `time_jst` of the traffic files: both are the start of the hour.
 
 A day is uploaded when all 24 maps are there. A map the site does not serve (HTTP 404) inside the window is
-retried on later runs; once the day is about to leave the window it is uploaded with the maps it has
-(never empty), and the missing hours are printed."""
-import argparse, csv, gzip, json, os, sys, tempfile, time, urllib.error, urllib.request
+retried on later runs; once the day is the oldest of the window it is uploaded with the maps it has (never
+empty), and the missing hours are printed. A file once uploaded is not replaced. A map with far fewer stations than
+the other maps of the day counts as missing. A station element the collector does not know is left out of the file
+and turns the run red, so the columns can be extended while the days are still on the site."""
+import argparse, csv, gzip, http.client, json, os, sys, tempfile, time, urllib.error, urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -22,8 +24,8 @@ import collect  # release helpers (gh, release_assets, ensure_release, upload)
 
 JST = timezone(timedelta(hours=9))
 BASE = "https://www.jma.go.jp/bosai/amedas"
-WINDOW = 8        # days back from yesterday that the site still serves completely
-NEAR_EXPIRY = 1   # the oldest days of the window are uploaded as they are
+WINDOW = 8        # days back from yesterday that the site still serves completely; the oldest is kept as it is
+THIN = 0.9        # a map with fewer stations than this share of the day's median counts as missing
 PAUSE = 0.5       # seconds between requests
 # source element -> column. Every value comes with a quality flag (`<column>_aqc`, 0 = normal).
 ELEMENTS = [
@@ -63,20 +65,22 @@ def get(url, tries=3):
             if e.code == 404:
                 return None
             err = e
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, OSError, http.client.HTTPException, json.JSONDecodeError) as e:
             err = e
         time.sleep(5 * (i + 1))
     raise RuntimeError(f"{url}: {err}")
 
 
-def rows_of(obs, data):
-    """One row per station of a map. A new element in the source stops the run (the columns are fixed)."""
+def rows_of(obs, data, unknown=None):
+    """One row per station of a map. Elements not in ELEMENTS are left out and added to `unknown`."""
     hour_start = (datetime.strptime(obs, "%Y%m%d%H%M") - timedelta(hours=1)).strftime("%Y%m%d%H%M")
     out = []
     for sid in sorted(data):
-        unknown = set(data[sid]) - set(KNOWN)
-        if unknown:
-            raise ValueError(f"map {obs}: unknown elements {sorted(unknown)} at station {sid}")
+        new = set(data[sid]) - set(KNOWN)
+        if new:
+            if unknown is None:
+                raise ValueError(f"map {obs}: unknown elements {sorted(new)} at station {sid}")
+            unknown |= new
         row = {"obs_time_jst": obs, "hour_start_jst": hour_start, "station_id": sid}
         for el, col in ELEMENTS:
             v = data[sid].get(el)
@@ -124,53 +128,69 @@ def main(argv=None, now=None):
             continue
         if a.dry_run:
             print(f"would fetch the station table for {month}"); continue
-        rows = station_rows(get(f"{BASE}/const/amedastable.json"))
-        if len(rows) < 1000:
-            raise RuntimeError(f"station table has only {len(rows)} stations")
+        try:
+            rows = station_rows(get(f"{BASE}/const/amedastable.json"))
+            if len(rows) < 1000:
+                raise RuntimeError(f"station table has only {len(rows)} stations")
+        except Exception as e:
+            print(f"::warning::station table {month}: {e}"); failed.append(name); continue
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, name)
             write_csv(path, rows, STATION_COLUMNS)
             if not collect.upload(tag, path, cache):
-                failed.append(name)
+                failed.append(name); continue
         print(f"station table {month}: {len(rows)} stations", flush=True)
 
+    unknown = set()
     for d in days:
         day = d.strftime("%Y%m%d"); tag = f"amedas-{day[:6]}"; name = f"amedas_{day}.csv.gz"
-        have = (collect.release_assets(tag) or set()) if a.dry_run else collect.ensure_release(tag, cache)
-        if name in have:
-            continue
-        if a.dry_run:
-            print(f"would fetch {day}"); continue
-        rows, missing, counts = [], [], []
-        for h in range(1, 25):
-            t = datetime(d.year, d.month, d.day) + timedelta(hours=h)
-            obs = t.strftime("%Y%m%d%H%M")
-            data = get(f"{BASE}/data/map/{t:%Y%m%d%H}0000.json")
-            time.sleep(PAUSE)
-            if data is None:
-                missing.append(obs); continue
-            rows += rows_of(obs, data)
-            counts.append(len(data))
-        near_expiry = (last - d).days >= WINDOW - NEAR_EXPIRY
-        if missing and not near_expiry:
-            print(f"  {day}: {len(missing)} of 24 maps not served yet, retry later"); continue
-        if not rows:
-            print(f"  {day}: not kept (no maps; the site no longer has this day)"); continue
-        if min(counts) < 0.9 * max(counts):
-            print(f"::warning::{day}: stations per map range {min(counts)}..{max(counts)}")
-        if missing:
-            partial.append(f"{day} (missing {', '.join(m[8:] for m in missing)})")
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, name)
-            write_csv(path, rows, COLUMNS)
-            if collect.upload(tag, path, cache):
-                print(f"  {day}: {len(rows)} rows, {24 - len(missing)} maps", flush=True)
-            else:
-                failed.append(name)
+        try:
+            have = (collect.release_assets(tag) or set()) if a.dry_run else collect.ensure_release(tag, cache)
+            if name in have:
+                continue
+            if a.dry_run:
+                print(f"would fetch {day}"); continue
+            maps, missing = {}, []
+            for h in range(1, 25):
+                t = datetime(d.year, d.month, d.day) + timedelta(hours=h)
+                obs = t.strftime("%Y%m%d%H%M")
+                data = get(f"{BASE}/data/map/{t:%Y%m%d%H}0000.json")
+                time.sleep(PAUSE)
+                if data is None:
+                    missing.append(obs)
+                else:
+                    maps[obs] = data
+            if maps:
+                med = sorted(len(m) for m in maps.values())[len(maps) // 2]
+                for obs in [o for o, m in maps.items() if len(m) < THIN * med]:
+                    print(f"  {day}: map {obs[8:]} has {len(maps[obs])} stations against {med}, counted as missing")
+                    missing.append(obs); del maps[obs]
+            missing.sort()
+            if missing and (last - d).days < WINDOW:
+                print(f"  {day}: {len(missing)} of 24 maps missing, retry later"); continue
+            if not maps:
+                print(f"  {day}: not kept (no maps; the site no longer has this day)"); continue
+            rows = [r for obs in sorted(maps) for r in rows_of(obs, maps[obs], unknown)]
+            if missing:
+                partial.append(f"{day} (missing {', '.join(m[8:] for m in missing)})")
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, name)
+                write_csv(path, rows, COLUMNS)
+                if collect.upload(tag, path, cache):
+                    print(f"  {day}: {len(rows)} rows, {len(maps)} maps", flush=True)
+                else:
+                    failed.append(name)
+        except Exception as e:
+            # one day the site keeps failing on must not keep the later days from being fetched
+            print(f"::warning::{day}: {e}")
+            failed.append(name)
     if partial:
         print("uploaded with maps the site no longer has: " + "; ".join(partial))
+    if unknown:
+        print(f"::error::the site has elements the collector does not know, left out of the files: {sorted(unknown)}")
     if failed:
         print(f"::error::{len(failed)} file(s) failed: {failed}")
+    if unknown or failed:
         sys.exit(1)
 
 
