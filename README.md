@@ -13,7 +13,7 @@ The Kaggle files are ready to use: `vehicles` per row for both kinds of counter 
 
 ## What the data shows
 
-The figures below are drawn from the archive by `scripts/figures.py`, `scripts/cover.py` and `scripts/animate.py`; the charts are redrawn every ten days and the animated maps every month. They drop rows the source flags as faulty or missing; the charts use permanent counters only.
+The figures below are drawn from the archive by `scripts/figures.py`, `scripts/cover.py`, `scripts/animate.py` and `scripts/rain.py`; the charts are redrawn every ten days and the animated maps every month. They drop rows the source flags as faulty or missing; the charts use permanent counters only.
 
 <img src="docs/figures/map.jpg" alt="Map of Japan drawn by the traffic counters: one point of light per counter, brighter where more vehicles passed that day">
 
@@ -55,6 +55,17 @@ The Obon holidays (August 2026), every two hours: each counter against its own u
 <img src="docs/figures/busier_silver_week.gif" alt="Animated map of Japan during the September 2026 holidays, every two hours">
 
 The same for the September 2026 holidays (Silver Week).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/rain_effect_dark.png">
+  <img src="docs/figures/rain_effect_light.png" alt="Line chart: counters in the rain carry fewer vehicles than dry counters at the same hour, more so on weekends and holidays and in heavier rain">
+</picture>
+
+Traffic in the rain (`scripts/rain.py`, with the AMeDAS observations below): each permanent counter takes the rain of its nearest AMeDAS station within 10 km, and is compared first with its usual for that hour and kind of day, then with the dry counters of the same hour, so that what the whole country does that hour cancels out. At the first drawing, with 1 mm or more in the hour, counters carried 4% fewer vehicles than dry roads on workdays and 8% fewer on weekends and holidays; the drop is smallest in the lightest rain (0.5 mm). That drawing rests on the first week of weather (2026-09-29 to 10-05, one weekend, 6,050 rainy counter-hours); the chart is redrawn every ten days as the record grows.
+
+<img src="docs/figures/rain_day.gif" alt="Animated map of the rainiest full day in the record, hour by hour: blue rain moves across Japan and the counters under it mostly show fewer vehicles than dry roads">
+
+The rainiest full day in the record, hour by hour: blue is the rain at the stations, white a counter in the rain with fewer vehicles than dry roads that hour, orange one with more. The line below is the median of the counters in the rain against dry roads, each hour.
 
 Land outlines: [Natural Earth](https://www.naturalearthdata.com/) (public domain).
 
