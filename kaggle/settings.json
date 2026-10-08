@@ -1,8 +1,32 @@
 {
   "id": "yasunorim/japan-road-traffic-volume",
   "expectedUpdateFrequency": "daily",
-  "userSpecifiedSources": "MLIT Traffic Volume API (交通量API, reference values), data provided by the Japan Road Traffic Information Center (JARTIC, https://www.jartic-open-traffic.org/); place names from the GSI reverse geocoder (国土地理院). Collected three times a day and built by https://github.com/yasumorishima/japan-road-traffic, which uploads a day only when every check passes.",
+  "userSpecifiedSources": "MLIT Traffic Volume API (交通量API, reference values), data provided by the Japan Road Traffic Information Center (JARTIC, https://www.jartic-open-traffic.org/); place names from the GSI reverse geocoder (国土地理院); census_2021_counters.csv from the 2021 Road Traffic Census (令和3年度全国道路・街路交通情勢調査, MLIT, 公共データ利用規約 第1.0版), edited. Collected three times a day and built by https://github.com/yasumorishima/japan-road-traffic, which uploads a day only when every check passes.",
   "files": {
+    "census_2021_counters.csv": {
+      "description": "365 permanent counters on national highways tied to their section of the 2021 Road Traffic Census (道路交通センサス, MLIT): route, lanes, speed limit and 2021 autumn weekday travel speeds. Join on (counter_id, sensor). The tie is inferred, not given by either source: see the match_ columns.",
+      "columns": {
+        "counter_id": "Counter ID (常時観測点コード); join with sensor",
+        "sensor": "Always loop (permanent counter)",
+        "census_section": "Census section number (交通調査基本区間番号), 11 digits with its leading zero; read it as text",
+        "route_number": "National route number (一般国道 N 号); empty for a route the census numbers outside 1-507",
+        "route_ja": "Route name in the census (Japanese), with the bypass or road name in brackets when it has one",
+        "route_en": "Route in English, e.g. National Route 5",
+        "observation_address_ja": "Address of the census observation point (Japanese)",
+        "observation_month": "Month of the census observation (YYYY-MM; the road manager's permanent counter, several days)",
+        "census_vol24_2021": "Census 24-hour volume, both directions, vehicles: observed in autumn 2021 (for 2 sections observed for 12 hours and expanded by the census; for 1 section the census estimate from a 2020 survey)",
+        "large12_pct_2021": "Census daytime (7-19h) share of large vehicles, %",
+        "lanes": "Number of lanes (census)",
+        "speed_limit_kmh": "Posted speed limit, km/h (census)",
+        "peak_speed_up_kmh": "2021 autumn weekday average travel speed, km/h, rush hours (7-9h or 17-19h, whichever is congested), the 'up' direction (上り) (census, from ETC2.0 probe data); empty where the census did not measure it. A static 2021 value, not today's speed",
+        "peak_speed_down_kmh": "2021 autumn weekday average travel speed, km/h, rush hours (7-9h or 17-19h, whichever is congested), the 'down' direction (下り) (census, from ETC2.0 probe data); empty where the census did not measure it. A static 2021 value, not today's speed",
+        "offpeak_speed_up_kmh": "2021 autumn weekday average travel speed, km/h, daytime off-peak (9-17h), the 'up' direction (上り) (census, from ETC2.0 probe data); empty where the census did not measure it. A static 2021 value, not today's speed",
+        "offpeak_speed_down_kmh": "2021 autumn weekday average travel speed, km/h, daytime off-peak (9-17h), the 'down' direction (下り) (census, from ETC2.0 probe data); empty where the census did not measure it. A static 2021 value, not today's speed",
+        "match_km": "Distance, km, between the counter and the geocoded census observation address (resolved to the town or a finer level; a pair resolved only to the municipality was left out)",
+        "town_in_address": "True when the counter's town name appears in the census observation address",
+        "match_vol_ratio": "Counter's September 2026 weekday median 24-hour volume / census 2021 volume; used to choose the section (kept between 0.86 and 1.16), not a measure of traffic growth"
+      }
+    },
     "counters.csv": {
       "description": "One row per counter (ID and sensor) seen in the API or the archive: location, prefecture, municipality and town (GSI reverse geocoder), and the last day it reported.",
       "columns": {
