@@ -54,7 +54,7 @@ def ensure_release(tag, cache):
         names = release_assets(tag)
         if names is None:
             r = gh("release", "create", tag, "--repo", REPO, "--title", tag, "--latest=false",
-                   "--notes", f"Daily files for {tag[4:8]}-{tag[8:]} (JST). See the README for columns and source.")
+                   "--notes", f"Daily files for {tag[-6:-2]}-{tag[-2:]} (JST). See the README for columns and source.")
             if r.returncode != 0 and release_assets(tag) is None:
                 raise RuntimeError(f"create {tag}: {r.stderr.strip()}")
             names = release_assets(tag) or set()

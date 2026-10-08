@@ -95,6 +95,21 @@ Files collected before 2026-10-06 (commit `906b6d6`) used the permanent-counter 
 
 `data/counters.csv` lists every counter (ID and sensor) seen in the API or in the archive, with its location, the prefecture, municipality and town at that point from the GSI reverse geocoder (出典：国土地理院), and `last_seen`, the latest day it reported. A counter that stops reporting keeps its row. The API gives no road or place names. Two counters got no municipality from the geocoder.
 
+### Weather (AMeDAS)
+
+To study traffic against rain, snow and temperature, hourly observations of every JMA AMeDAS station are kept as well, in the release `amedas-YYYYMM`: `amedas_YYYYMMDD.csv.gz` (the 24 hourly maps from 01:00 of that day to 00:00 of the next, one row per station and hour) and `amedas_stations_YYYYMM.csv.gz` (station ID, type, latitude and longitude in degrees, altitude, and the names in Japanese, kana and English, as listed that month). The JMA site serves these maps for only about 9 days, so the record starts on 2026-09-29 (that day lacks 02:00 to 08:00, already gone when collection started).
+
+| column | meaning |
+|---|---|
+| `obs_time_jst` | observation time, JST, `YYYYMMDDhhmm` |
+| `hour_start_jst` | `obs_time_jst` minus one hour: the hour that hourly amounts cover, matching `時間コード` / `time_jst` of the traffic files |
+| `station_id` | AMeDAS station number (joins the station table) |
+| `temp_c`, `humidity_pct`, `wind_ms`, `wind_dir16` (0 = calm, 1 = NNE … 16 = N), `pressure_hpa`, `sea_level_pressure_hpa`, `visibility_m`, `weather_code`, `snow_depth_cm` | readings at the observation time |
+| `precip_10m_mm`, `precip_1h_mm`, `precip_3h_mm`, `precip_24h_mm`, `sun_10m_min`, `sun_1h_h`, `snow_1h_cm` … `snow_24h_cm` | amounts over the period ending at the observation time |
+| `<column>_aqc` | JMA quality flag of the value; 0 is normal |
+
+Each station measures only some elements: an element it does not measure is blank, except the snowfall amounts (`snow_1h_cm` …), which the source fills with 0 and a blank flag at stations without a snow gauge, so read them only where the flag is set.
+
 ## Caveats
 
 - These are counts, not speeds. Congestion has to be inferred, for example by comparing a count with the same weekday and hour.
@@ -106,6 +121,8 @@ Files collected before 2026-10-06 (commit `906b6d6`) used the permanent-counter 
 
 `.github/workflows/collect.yml` runs three times a day. `scripts/collect.py` lists the days the source still holds but the releases do not have, fetches them one request at a time with a pause between requests, and uploads a file when every time code of the day is present (24 hourly or 288 five-minute codes). The source itself lacks a few time codes on many days (for example 287 of 288 five-minute codes; asking again returns nothing), so a day older than yesterday with at most 5% of its codes missing is uploaded as it is. A time code with far fewer counters than the rest of the day counts as missing. A day with a larger gap is retried, and kept as it is only when it is about to leave the source window and still has rows; days about to leave the source are fetched first, then the newest days. A missing time code means the source has no value for it. A missed run is recovered by the next one while the day is still in the source window.
 
+`.github/workflows/collect-weather.yml` runs `scripts/amedas.py` three times a day, separately from the traffic collector: it uploads a day when all 24 hourly maps are served, retries a day with a missing map, and keeps a day as it is (never empty) once it is about to leave the 9-day window.
+
 ## Kaggle dataset
 
 `.github/workflows/publish.yml` runs after each collect run. It lists the release assets with their sha256, and when the list differs from `data/published_assets.txt` it downloads them, adds new counters to `data/counters.csv` (`scripts/build_counters.py --from-files`), writes one Parquet file per ten days and resolution with English column names (`scripts/build_kaggle.py`: `hourly_YYYY-MM_DD-DD.parquet`, `five_minute_kanto_YYYY-MM_DD-DD.parquet`, plus `counters.csv`; Kaggle's preview failed on monthly files of 1.1 million rows and more), and writes the metadata (`scripts/make_kaggle_meta.py`, which stops if a column has no description). It publishes a new version of [yasunorim/japan-road-traffic-volume](https://www.kaggle.com/datasets/yasunorim/japan-road-traffic-volume) only when the repository variable `KAGGLE_PUBLISH` is `true` (a manual run with `publish` always does), and records the list as published only after Kaggle reports the new version ready. The Kaggle files also carry derived columns: `up_vehicles` / `down_vehicles` / `vehicles` (one column for both sensors, empty when a permanent counter flags a fault), `flagged`, `weekday`, `is_holiday` (national and substitute holidays from `data/holidays_jp.csv`, taken from the Cabinet Office list: 出典：内閣府ホームページ「国民の祝日について」（公共データ利用規約 第1.0版）を加工して作成; the build stops when the data reaches a year the list does not cover) and `prefecture` / `prefecture_en`. The published `counters.csv` adds `prefecture_en` and `municipality_en` (e.g. Yokohama-shi Tsurumi-ku) from `data/municipalities_en.csv`, made by `scripts/make_municipalities_en.py` from the MIC local government code list (出典：「全国地方公共団体コード」（総務省）（https://www.soumu.go.jp/denshijiti/code.html）を加工して作成, for the type of municipality) and Wikidata's English labels (CC0, for the name); town names stay in Japanese. Column descriptions for the dataset page are in `kaggle/settings.json`; the cover image is drawn from the data by `scripts/cover.py`.
@@ -116,5 +133,7 @@ Files collected before 2026-10-06 (commit `906b6d6`) used the permanent-counter 
 （データ提供：公益財団法人日本道路交通情報センター https://www.jartic-open-traffic.org/ ）
 
 Traffic volume data from the MLIT Traffic Volume API (reference values), provided by the Japan Road Traffic Information Center (JARTIC), processed by this repository. The JARTIC terms state compatibility with CC BY 4.0. This archive is not made or endorsed by MLIT or JARTIC.
+
+Weather: 出典：気象庁ホームページ（https://www.jma.go.jp/bosai/amedas/）のアメダス観測値を加工して作成. Observations from the Japan Meteorological Agency website, used under the JMA website terms (Public Data License 1.0, compatible with CC BY 4.0). Only observations are stored; no forecast or warning is redistributed.
 
 Code: MIT License.
