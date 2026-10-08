@@ -106,7 +106,8 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ ! -f docs/figures/rain_day.gif ] || [[ "$d" =~ ^(01|11|21)$ ]]; then
             mkdir -p _weather _rain
             for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName -q ".[].tagName" | grep "^amedas-"); do
-              gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir _weather --pattern "*.csv.gz" --skip-existing
+              gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir _weather --pattern "*.csv.gz" --skip-existing \
+                || echo "::warning::could not download $tag"
             done
             if python scripts/rain.py _build _weather data/japan_land.json _rain; then
               cp _rain/* docs/figures/

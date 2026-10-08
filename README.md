@@ -58,10 +58,10 @@ The same for the September 2026 holidays (Silver Week).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/rain_effect_dark.png">
-  <img src="docs/figures/rain_effect_light.png" alt="Line chart: counters in the rain carry fewer vehicles than dry counters at the same hour, more so on weekends and holidays and in heavier rain">
+  <img src="docs/figures/rain_effect_light.png" alt="Line chart: counters in the rain carry a few percent fewer vehicles than dry roads nearby at the same hour, by the amount of rain">
 </picture>
 
-Traffic in the rain (`scripts/rain.py`, with the AMeDAS observations below): each permanent counter takes the rain of its nearest AMeDAS station within 10 km, and is compared first with its usual for that hour and kind of day, then with the dry counters of the same hour, so that what the whole country does that hour cancels out. At the first drawing, with 1 mm or more in the hour, counters carried 4% fewer vehicles than dry roads on workdays and 8% fewer on weekends and holidays; the drop is smallest in the lightest rain (0.5 mm). That drawing rests on the first week of weather (2026-09-29 to 10-05, one weekend, 6,050 rainy counter-hours); the chart is redrawn every ten days as the record grows.
+Traffic in the rain (`scripts/rain.py`, with the AMeDAS observations below): each permanent counter takes the rain of its nearest AMeDAS station within 10 km, and is compared first with its usual for that hour and kind of day, then with the dry counters within 200 km at the same hour, so that what the region does that hour cancels out. At the first drawing (2026-09-29 to 10-06, 5,918 counter-hours with 1 mm or more), counters in the rain carried about 2.5% fewer vehicles than dry roads nearby. The drop looks larger on weekends and holidays (about 4%, against 2% on workdays), but almost all of those rainy weekend hours fall on one Sunday (October 4), so that difference is not established yet. Compared with all dry roads in Japan instead of nearby ones the drop doubles, because the rainy region differs from the rest of the country in other ways that day. The chart is redrawn every ten days as the record grows.
 
 <img src="docs/figures/rain_day.gif" alt="Animated map of the rainiest full day in the record, hour by hour: blue rain moves across Japan and the counters under it mostly show fewer vehicles than dry roads">
 

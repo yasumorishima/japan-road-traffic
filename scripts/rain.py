@@ -8,9 +8,10 @@ Each permanent counter takes the rain of its nearest AMeDAS station within 10 km
 only values with the normal quality flag). A counter's hour is compared with its usual: the median of the same
 counter, hour and kind of day (workday, or weekend and holiday) over the days outside the holiday periods (at least
 five days, median at least 20 vehicles). Rain falls on some days more than others and on some regions more than
-others, so a rainy counter is compared with the dry counters of the same hour: rel = (vehicles / usual) / (median of
-vehicles / usual over the counters with no rain that hour). rel below 1 means fewer vehicles than the dry counters
-had at the same time.
+others, so a rainy counter is compared with the dry counters near it at the same hour: rel = (vehicles / usual) /
+(median of vehicles / usual over the counters with no rain within 200 km that hour, at least 10 of them). rel below 1
+means fewer vehicles than the dry roads nearby had at the same time. A national dry reference instead would mix in
+whatever the rainy region does differently that day (measured on the first week: it doubled the weekend drop).
 
   rain_effect_<theme>.png  median rel by the rain in the hour, workdays and weekends/holidays
   rain_day.gif             the day with the most rainy counter-hours: rain as blue light at the stations, counters
@@ -27,6 +28,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import animate, figures
 
 NEAR_KM = 10
+DRY_KM = 200         # dry counters this close to a rainy one form its reference
+MIN_DRY = 10
 WET = 1.0            # mm in the hour that counts as rain for the headline numbers
 MIN_HOURS = 100      # counter-hours a rain class needs to be drawn
 BINS = [(0.5, 0.5, "0.5"), (1.0, 1.0, "1"), (1.5, 3.0, "1.5–3"), (3.5, 5.0, "3.5–5"), (5.5, 10.0, "5.5–10"),
@@ -43,11 +46,31 @@ def usual(h):
     return u[(u["size"] >= 5) & (u["median"] >= 20)]["median"].rename("usual")
 
 
-def nearest(counters, stations):
-    la1, lo1 = np.radians(counters.latitude.values)[:, None], np.radians(counters.longitude.values)[:, None]
-    la2, lo2 = np.radians(stations.lat.values)[None, :], np.radians(stations.lon.values)[None, :]
+def km_matrix(lat1, lon1, lat2, lon2):
+    la1, lo1 = np.radians(np.asarray(lat1))[:, None], np.radians(np.asarray(lon1))[:, None]
+    la2, lo2 = np.radians(np.asarray(lat2))[None, :], np.radians(np.asarray(lon2))[None, :]
     a = np.sin((la2 - la1) / 2) ** 2 + np.cos(la1) * np.cos(la2) * np.sin((lo2 - lo1) / 2) ** 2
-    d = 6371 * 2 * np.arcsin(np.sqrt(a))
+    return 6371 * 2 * np.arcsin(np.sqrt(a))
+
+
+def local_rel(x):
+    """ratio of each counter-hour with rain ÷ the median ratio of the dry counters within DRY_KM that hour;
+    NaN for dry hours and where fewer than MIN_DRY dry counters are near"""
+    rel = pd.Series(np.nan, index=x.index)
+    for t, g in x.groupby("time_jst"):
+        wet, dry = g[g.precip_1h_mm > 0], g[g.precip_1h_mm == 0]
+        if wet.empty or len(dry) < MIN_DRY:
+            continue
+        near = km_matrix(wet.latitude, wet.longitude, dry.latitude, dry.longitude) <= DRY_KM
+        dr = dry.ratio.values
+        for idx, row, r in zip(wet.index, near, wet.ratio.values):
+            if row.sum() >= MIN_DRY:
+                rel[idx] = r / np.median(dr[row])
+    return rel
+
+
+def nearest(counters, stations):
+    d = km_matrix(counters.latitude, counters.longitude, stations.lat, stations.lon)
     out = counters[["counter_id", "sensor", "longitude", "latitude"]].copy()
     out["station_id"] = stations.station_id.values[d.argmin(1)]
     out["km"] = d.min(1)
@@ -80,10 +103,8 @@ def main():
     x = h[h.time_jst.between(w.time_jst.min(), w.time_jst.max())].merge(near, on=["counter_id", "sensor"])
     x = x.merge(w, on=["time_jst", "station_id"])
     x["ratio"] = x.vehicles / x.usual
-    dry = x[x.precip_1h_mm == 0].groupby("time_jst").ratio.agg(["median", "size"])
-    dry = dry[dry["size"] >= 100]["median"].rename("dry")
-    x = x.join(dry, on="time_jst", how="inner")
-    x["rel"] = x.ratio / x.dry
+    x["rel"] = local_rel(x)
+    x = x[x.rel.notna()]
     wet = x[x.precip_1h_mm >= WET]
     days = x.time_jst.dt.normalize().nunique()
     span = f"{x.time_jst.min():%Y-%m-%d} to {x.time_jst.max():%Y-%m-%d}"
@@ -104,13 +125,16 @@ def main():
     tab = tab[tab.rain.map(keep)]
     names = list(dict.fromkeys(tab.rain))
     print(tab.to_string(index=False))
-    head = {k: (wet[wet.workday == (k == "Workdays")].rel.median() - 1) * 100 for k in ("Workdays", "Weekends and holidays")}
-    a, b = head["Workdays"], head["Weekends and holidays"]
-    if a < 0 and b < 0:
-        main_title = (f"In the rain, traffic drops {-a:.0f}% on workdays and {-b:.0f}% on weekends and holidays"
-                      if round(a) != round(b) else f"In the rain, traffic drops {-a:.0f}%")
+    # the title states only the pooled drop: workdays and weekends rest on very different numbers of rainy days
+    pooled = (wet.rel.median() - 1) * 100
+    wet_days = wet.time_jst.dt.normalize().nunique()
+    print(f"pooled {pooled:+.2f}% over {wet_days} days with rain; workdays "
+          f"{(wet[wet.workday].rel.median() - 1) * 100:+.2f}%, weekends and holidays "
+          f"{(wet[~wet.workday].rel.median() - 1) * 100:+.2f}% on {wet[~wet.workday].time_jst.dt.normalize().nunique()} days")
+    if round(pooled) < 0:
+        main_title = f"In the rain, roads carry about {-pooled:.0f}% fewer vehicles than dry roads nearby"
     else:
-        main_title = "Traffic in the rain compared with dry roads at the same hour"
+        main_title = "Traffic in the rain compared with dry roads nearby at the same hour"
     for name, t in figures.THEMES.items():
         fig, ax = figures.figure(t, 11, 4.6)
         ax.axhline(0, color=t["base"], linewidth=1.2)
@@ -119,19 +143,20 @@ def main():
             xs = np.arange(len(g))
             ax.plot(xs, g.pct.values, color=colors[kind], linewidth=2.4, marker="o", markersize=6,
                     markeredgecolor=t["surface"], markeredgewidth=1.5)
+            if not np.isfinite(g.pct.values).any():
+                continue
             last = int(np.nanargmax(np.where(np.isfinite(g.pct.values), xs, -1)))
             ax.annotate(kind, (last, g.pct.values[last]), xytext=(8, 0), textcoords="offset points",
                         color=colors[kind], fontsize=12, va="center")
         ax.set_xticks(range(len(names)), names)
         ax.set_xlim(-0.3, len(names) - 1 + 1.9)
         ax.set_xlabel("rain in the hour at the nearest AMeDAS station (mm)", color=t["ink2"], fontsize=13)
-        ax.set_ylabel("vehicles vs dry roads (%)", color=t["ink2"], fontsize=13)
-        lo = min(-12, np.nanmin(tab.pct) - 2)
-        ax.set_ylim(lo, 2)
-        ax.text(-0.25, 0.3, "dry roads at the same hour", color=t["muted"], fontsize=11, va="bottom")
+        ax.set_ylabel("vs dry roads nearby (%)", color=t["ink2"], fontsize=13)
+        lo = min(-6, np.nanmin(tab.pct) - 1.5)
+        ax.set_ylim(lo, max(2, np.nanmax(tab.pct) + 1))
+        ax.text(-0.25, 0.3, f"dry roads within {DRY_KM} km, same hour", color=t["muted"], fontsize=11, va="bottom")
         figures.title(fig, ax, t, main_title,
-                      f"Each counter vs its usual day, then vs dry counters at the same hour; {span}, "
-                      f"{len(wet):,} rainy counter-hours")
+                      f"Each counter vs its usual day, then vs dry counters within {DRY_KM} km that hour, {span}")
         fig.tight_layout()
         fig.savefig(os.path.join(out, f"rain_effect_{name}.png"), dpi=110, facecolor=t["surface"])
         plt.close(fig)
@@ -140,7 +165,10 @@ def main():
     # the day with the most rainy counter-hours among the days with all 24 maps
     full = w.groupby(w.time_jst.dt.normalize()).time_jst.nunique()
     counts = wet.time_jst.dt.normalize().value_counts()
-    day = counts[counts.index.isin(full[full == 24].index)].idxmax()
+    counts = counts[counts.index.isin(full[full == 24].index)]
+    if counts.empty:
+        sys.exit("no day with all 24 maps has rain; the animated map is not drawn")
+    day = counts.idxmax()
     rings = json.load(open(land))["rings"]
     m = animate.Map((128.5, 146.2, 30.8, 45.8), 900, 1040, 130, 120, rings)
     hours = pd.date_range(day, day + pd.Timedelta(hours=23), freq="1h")
