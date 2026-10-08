@@ -5,17 +5,17 @@ name: Collect weather (AMeDAS)
 # collector so that a problem here never holds up the traffic files or the Kaggle publish.
 on:
   schedule:
-    - cron: 41 17 DESKTOP-NJ8BIR1 KAGGLE_DATASETS_MEMO.md memory OSS_DATASCIENCE.md scripts settings.json DESKTOP-NJ8BIR1 KAGGLE_DATASETS_MEMO.md memory OSS_DATASCIENCE.md scripts settings.json *   # 02:41 JST
-    - cron: 11 2 DESKTOP-NJ8BIR1 KAGGLE_DATASETS_MEMO.md memory OSS_DATASCIENCE.md scripts settings.json DESKTOP-NJ8BIR1 KAGGLE_DATASETS_MEMO.md memory OSS_DATASCIENCE.md scripts settings.json *    # 11:11 JST
-    - cron: 53 10 DESKTOP-NJ8BIR1 KAGGLE_DATASETS_MEMO.md memory OSS_DATASCIENCE.md scripts settings.json DESKTOP-NJ8BIR1 KAGGLE_DATASETS_MEMO.md memory OSS_DATASCIENCE.md scripts settings.json *   # 19:53 JST
+    - cron: '41 17 * * *'   # 02:41 JST
+    - cron: '11 2 * * *'    # 11:11 JST
+    - cron: '53 10 * * *'   # 19:53 JST
   workflow_dispatch:
     inputs:
       memo:
-        description: Why this run
+        description: 'Why this run'
         required: true
         type: string
       dry_run:
-        description: Only list missing days
+        description: 'Only list missing days'
         required: false
         default: false
         type: boolean
