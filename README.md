@@ -13,18 +13,26 @@ The Kaggle files are ready to use: `vehicles` per row for both kinds of counter 
 
 ## What the data shows
 
-The figures below are drawn from the archive by `scripts/figures.py` and `scripts/cover.py` and redrawn every ten days. They use permanent counters only and drop rows the source flags as faulty or missing.
+The figures below are drawn from the archive by `scripts/figures.py`, `scripts/cover.py` and `scripts/animate.py`; the charts are redrawn every ten days and the animated maps every month. They drop rows the source flags as faulty or missing; the charts use permanent counters only.
 
 <img src="docs/figures/map.jpg" alt="Map of Japan drawn by the traffic counters: one point of light per counter, brighter where more vehicles passed that day">
 
 Every counter on one day, as a point of light at its location: the national highway network appears by itself.
 
+<img src="docs/figures/day_japan.gif" alt="Animated map of Japan through a workday, hour by hour: counters brighten from 6:00, stay bright through the day and fade after 19:00">
+
+A workday, hour by hour (mean over workdays): the roads wake up around 6:00 and fade after 19:00; at 3:00 the brightest points are around Tokyo and Nagoya.
+
+<img src="docs/figures/day_kanto.gif" alt="Animated map of the Tokyo area through a workday, every 15 minutes, from the five-minute counts">
+
+The same around Tokyo every 15 minutes, from the five-minute counts.
+
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/weekday_hour_dark.png">
-  <img src="docs/figures/weekday_hour_light.png" alt="Heatmap of mean vehicles per hour by weekday and hour">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/day_shape_dark.png">
+  <img src="docs/figures/day_shape_light.png" alt="Line chart of mean vehicles per hour: workdays with a morning and an evening peak, weekends and holidays flat from late morning to evening">
 </picture>
 
-Weekdays peak in the morning and evening rush; weekends spread over the middle of the day.
+Workdays have a morning and an evening rush; weekends and holidays have no rush hours but stay busy all day.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/large_share_dark.png">
@@ -39,6 +47,16 @@ Large vehicles make up a much larger share of traffic at night.
 </picture>
 
 Each day compared with the same weekday at the same counter: holiday periods rise well above the usual level.
+
+<img src="docs/figures/busier_obon.gif" alt="Animated map of Japan during the Obon holidays 2026, every two hours: counters above their usual traffic glow orange, most of the country outside Tokyo">
+
+The Obon holidays (August 2026), every two hours: each counter against its own usual for that hour and kind of day. Orange counters carry more than 10% above usual. From 8:00 to 20:00 on August 8–16, 58% of the counter-hours outside the Tokyo area (longitude 139.0–140.3, latitude 35.2–36.2) were orange, against 14% inside it: most of the country gets busier while traffic around Tokyo stays near its usual level (median ×0.97). On August 8 the source has no CCTV counts, so that day shows permanent counters only. This is traffic volume, not congestion: the source has no speeds.
+
+<img src="docs/figures/busier_silver_week.gif" alt="Animated map of Japan during the September 2026 holidays, every two hours">
+
+The same for the September 2026 holidays (Silver Week).
+
+Land outlines: [Natural Earth](https://www.naturalearthdata.com/) (public domain).
 
 ## Why this exists
 

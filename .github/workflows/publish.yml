@@ -87,8 +87,10 @@ jobs:
 
       # README figures are redrawn when a new ten-day file starts (JST days 01, 11, 21), on a manual run, or
       # when they do not exist yet; redrawing them daily would grow the repository by every image every day.
+      # a failure here must not stop the Kaggle publish: the figures are optional
       - name: Draw the README figures
         if: env.CHANGED == 'true' || inputs.publish
+        continue-on-error: true
         run: |
           pip install --quiet matplotlib pillow
           d=$(TZ=Asia/Tokyo date +%d)
@@ -96,6 +98,14 @@ jobs:
             python scripts/figures.py _build docs/figures
             latest=$(ls _build/hourly_*.parquet | sort | tail -1)
             python scripts/cover.py "$latest" _build/counters.csv docs/figures/map.jpg
+            echo "FIGURES=true" >> "$GITHUB_ENV"
+          fi
+          # the animated maps (about 2 MB a month, and the holiday ones once each) are redrawn monthly, on JST day 01
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ ! -f docs/figures/day_japan.gif ] || [ "$d" = 01 ]; then
+            # drawn into a scratch folder and copied only when every file is complete
+            mkdir -p _anim && cp docs/figures/busier_*.gif _anim/ 2>/dev/null || true
+            python scripts/animate.py _build data/japan_land.json _anim
+            cp _anim/*.gif docs/figures/
             echo "FIGURES=true" >> "$GITHUB_ENV"
           fi
 
