@@ -15,7 +15,8 @@ TITLE = "Japan Road Traffic Volume (Hourly Archive)"
 SUBTITLE = "Vehicle counts on Japan's national highways, hourly nationwide and 5-min Kanto"
 SOURCES = ("MLIT Traffic Volume API (交通量API, reference values), data provided by the Japan Road Traffic "
            "Information Center (JARTIC, https://www.jartic-open-traffic.org/); place names from the GSI reverse "
-           "geocoder (国土地理院). Collected three times a day and built by https://github.com/yasumorishima/japan-road-traffic, "
+           "geocoder (国土地理院); census_2021_counters.csv from the 2021 Road Traffic Census (令和3年度全国道路・街路交通情勢調査, "
+           "MLIT, 公共データ利用規約 第1.0版), edited. Collected three times a day and built by https://github.com/yasumorishima/japan-road-traffic, "
            "which uploads a day only when every check passes.")
 
 DIR = {"up": "the 'up' direction (上り)", "down": "the 'down' direction (下り)"}
@@ -104,6 +105,36 @@ COUNTER_COLS = {
     "last_seen": "Latest day (JST) this counter reported in the API or in the archive",
 }
 
+CENSUS_DESC = ("365 permanent counters on national highways tied to their section of the 2021 Road Traffic Census "
+               "(道路交通センサス, MLIT): route, lanes, speed limit and 2021 autumn weekday travel speeds. Join on "
+               "(counter_id, sensor). The tie is inferred, not given by either source: see the match_ columns.")
+SPEED = ("2021 autumn weekday average travel speed, km/h, {when}, {d} (census, from ETC2.0 probe data); "
+         "empty where the census did not measure it. A static 2021 value, not today's speed")
+RUSH = "rush hours (7-9h or 17-19h, whichever is congested)"
+CENSUS_COLS = {
+    "counter_id": "Counter ID (常時観測点コード); join with sensor",
+    "sensor": "Always loop (permanent counter)",
+    "census_section": "Census section number (交通調査基本区間番号), 11 digits with its leading zero; read it as text",
+    "route_number": "National route number (一般国道 N 号); empty for a route the census numbers outside 1-507",
+    "route_ja": "Route name in the census (Japanese), with the bypass or road name in brackets when it has one",
+    "route_en": "Route in English, e.g. National Route 5",
+    "observation_address_ja": "Address of the census observation point (Japanese)",
+    "observation_month": "Month of the census observation (YYYY-MM; the road manager's permanent counter, several days)",
+    "census_vol24_2021": ("Census 24-hour volume, both directions, vehicles: observed in autumn 2021 (for 2 sections observed for 12 hours "
+                          "and expanded by the census; for 1 section the census estimate from a 2020 survey)"),
+    "large12_pct_2021": "Census daytime (7-19h) share of large vehicles, %",
+    "lanes": "Number of lanes (census)",
+    "speed_limit_kmh": "Posted speed limit, km/h (census)",
+    "peak_speed_up_kmh": SPEED.format(when=RUSH, d=DIR["up"]),
+    "peak_speed_down_kmh": SPEED.format(when=RUSH, d=DIR["down"]),
+    "offpeak_speed_up_kmh": SPEED.format(when="daytime off-peak (9-17h)", d=DIR["up"]),
+    "offpeak_speed_down_kmh": SPEED.format(when="daytime off-peak (9-17h)", d=DIR["down"]),
+    "match_km": "Distance, km, between the counter and the geocoded census observation address (resolved to the town or a finer level; a pair resolved only to the municipality was left out)",
+    "town_in_address": "True when the counter's town name appears in the census observation address",
+    "match_vol_ratio": "Counter's September 2026 weekday median 24-hour volume / census 2021 volume; used to choose "
+                       "the section (kept between 0.86 and 1.16), not a measure of traffic growth",
+}
+
 FILE_DESC = {
     "hourly": "Hourly vehicle counts for {m} (JST), nationwide: permanent and CCTV counters on national highways and "
               "the expressways that have MLIT counters. One row per hour, counter and sensor.",
@@ -132,6 +163,10 @@ def main():
             desc = ("One row per counter (ID and sensor) seen in the API or the archive: location, prefecture, "
                     "municipality and town (GSI reverse geocoder), and the last day it reported.")
             table = COUNTER_COLS
+        elif n == "census_2021_counters.csv":
+            cols = pd.read_csv(p, nrows=0).columns.tolist()
+            desc = CENSUS_DESC
+            table = CENSUS_COLS
         elif n == "dataset-metadata.json":
             continue
         else:
@@ -139,13 +174,13 @@ def main():
         missing = [c for c in cols if c not in table]
         if missing:
             sys.exit(f"{n}: columns without a description: {missing}")
-        if table is COUNTER_COLS and set(cols) != set(table):
+        if table is not COLS and set(cols) != set(table):
             sys.exit(f"{n}: described columns not in the file: {sorted(set(table) - set(cols))}")
         resources.append({"path": n, "description": desc,
                           "schema": {"fields": [{"name": c, "description": table[c]} for c in cols]}})
         files[n] = {"description": desc, "columns": {c: table[c] for c in cols}}
-    if not any(n.startswith("hourly_") for n in files) or "counters.csv" not in files:
-        sys.exit("the build has no hourly file or no counters.csv")
+    if not any(n.startswith("hourly_") for n in files) or not {"counters.csv", "census_2021_counters.csv"} <= set(files):
+        sys.exit("the build has no hourly file, no counters.csv or no census_2021_counters.csv")
     meta = {"title": TITLE, "subtitle": SUBTITLE, "id": ID, "licenses": [{"name": "CC-BY-4.0"}],
             "keywords": ["transportation", "time series analysis", "japan", "automobiles and vehicles", "tabular"],
             "expectedUpdateFrequency": "daily", "description": DESCRIPTION, "resources": resources}

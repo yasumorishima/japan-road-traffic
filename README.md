@@ -121,12 +121,26 @@ To study traffic against rain, snow and temperature, hourly observations of ever
 
 Each station measures only some elements: an element it does not measure is blank, except the snowfall amounts (`snow_1h_cm` …), which the source fills with 0 and a blank flag at stations without a snow gauge, so read them only where the flag is 0 (stations with a gauge carried flag 6 in early October, outside the snow season).
 
+### Road Traffic Census 2021
+
+`data/census_2021_counters.csv` ties 365 permanent counters on national highways to their section of the 2021 Road Traffic Census
+(全国道路・街路交通情勢調査, MLIT): census section number, route (Japanese, and English such as National Route 5), lanes, speed limit,
+and the 2021 autumn weekday travel speeds per direction at rush hours (7-9h or 17-19h, whichever is congested) and off-peak (9-17h).
+Neither source links the two: the census has no coordinates and the API has no route names, so the tie is inferred
+(`scripts/census/`). Each counter is paired one to one with a census section that the road manager observes with a permanent counter,
+within 3 km of the census observation address (pairs whose address the GSI address search places only at the prefecture or municipality are left out), by the closest 24-hour volume (the counter's September 2026 weekday median against
+the census 2021 value, kept within 0.86-1.16). A pair is kept only when two traffic fingerprints that the volume does not decide also
+agree: the share of traffic going up (within 2 points) and the day/night ratio (within 0.05). Two further checks: the daytime
+peak-hour share differs by more than 1 point for 3.8% of the kept pairs, against 47.4% for shuffled pairs (this check was used to
+tighten the rule, so it is not independent of it); and, not used by the rule, where a counter's up and down large-vehicle shares
+differ by more than 2 points, the census shows the same side heavier for 93% (so both use the same up and down). The speeds are 2021 values, not today's, and the column `match_vol_ratio` describes the matching, not traffic growth.
+
 ## Caveats
 
-- These are counts, not speeds. Congestion has to be inferred, for example by comparing a count with the same weekday and hour.
+- These are counts, not live speeds. Congestion has to be inferred, for example by comparing a count with the same weekday and hour. `data/census_2021_counters.csv` adds a static 2021 travel speed for 365 counters (above).
 - The values are reference values, not official MLIT traffic survey results. Some counters are unpublished at times because of faults.
 - A permanent counter that fails reports 0 vehicles with a fault or missing flag (in the archive through 2026-10-05, 11,782 of the 17,652 zero-count rows carry a flag; one counter reads 0 with every hour flagged from late July). Drop flagged rows before using the counts (in the Kaggle files, `vehicles` is already empty for them).
-- The API does not give road names, and route numbers are not added here: the only route-name sources found were non-commercial (National Land Numerical Information, emergency transport roads) or share-alike (OpenStreetMap). Place names come from the location.
+- The API does not give road names. Route names come only from the 2021 census, for the 365 counters tied to it; the other route-name sources found were non-commercial (National Land Numerical Information, emergency transport roads) or share-alike (OpenStreetMap). Place names come from the location.
 
 ## How it is collected
 
@@ -136,7 +150,7 @@ Each station measures only some elements: an element it does not measure is blan
 
 ## Kaggle dataset
 
-`.github/workflows/publish.yml` runs after each collect run. It lists the release assets with their sha256, and when the list differs from `data/published_assets.txt` it downloads them, adds new counters to `data/counters.csv` (`scripts/build_counters.py --from-files`), writes one Parquet file per ten days and resolution with English column names (`scripts/build_kaggle.py`: `hourly_YYYY-MM_DD-DD.parquet`, `five_minute_kanto_YYYY-MM_DD-DD.parquet`, plus `counters.csv`; Kaggle's preview failed on monthly files of 1.1 million rows and more), and writes the metadata (`scripts/make_kaggle_meta.py`, which stops if a column has no description). It publishes a new version of [yasunorim/japan-road-traffic-volume](https://www.kaggle.com/datasets/yasunorim/japan-road-traffic-volume) only when the repository variable `KAGGLE_PUBLISH` is `true` (a manual run with `publish` always does), and records the list as published only after Kaggle reports the new version ready. The Kaggle files also carry derived columns: `up_vehicles` / `down_vehicles` / `vehicles` (one column for both sensors, empty when a permanent counter flags a fault), `flagged`, `weekday`, `is_holiday` (national and substitute holidays from `data/holidays_jp.csv`, taken from the Cabinet Office list: 出典：内閣府ホームページ「国民の祝日について」（公共データ利用規約 第1.0版）を加工して作成; the build stops when the data reaches a year the list does not cover) and `prefecture` / `prefecture_en`. The published `counters.csv` adds `prefecture_en` and `municipality_en` (e.g. Yokohama-shi Tsurumi-ku) from `data/municipalities_en.csv`, made by `scripts/make_municipalities_en.py` from the MIC local government code list (出典：「全国地方公共団体コード」（総務省）（https://www.soumu.go.jp/denshijiti/code.html）を加工して作成, for the type of municipality) and Wikidata's English labels (CC0, for the name); town names stay in Japanese. Column descriptions for the dataset page are in `kaggle/settings.json`; the cover image is drawn from the data by `scripts/cover.py`.
+`.github/workflows/publish.yml` runs after each collect run. It lists the release assets with their sha256, and when the list differs from `data/published_assets.txt` it downloads them, adds new counters to `data/counters.csv` (`scripts/build_counters.py --from-files`), writes one Parquet file per ten days and resolution with English column names (`scripts/build_kaggle.py`: `hourly_YYYY-MM_DD-DD.parquet`, `five_minute_kanto_YYYY-MM_DD-DD.parquet`, plus `counters.csv` and `census_2021_counters.csv`; Kaggle's preview failed on monthly files of 1.1 million rows and more), and writes the metadata (`scripts/make_kaggle_meta.py`, which stops if a column has no description). It publishes a new version of [yasunorim/japan-road-traffic-volume](https://www.kaggle.com/datasets/yasunorim/japan-road-traffic-volume) only when the repository variable `KAGGLE_PUBLISH` is `true` (a manual run with `publish` always does), and records the list as published only after Kaggle reports the new version ready. The Kaggle files also carry derived columns: `up_vehicles` / `down_vehicles` / `vehicles` (one column for both sensors, empty when a permanent counter flags a fault), `flagged`, `weekday`, `is_holiday` (national and substitute holidays from `data/holidays_jp.csv`, taken from the Cabinet Office list: 出典：内閣府ホームページ「国民の祝日について」（公共データ利用規約 第1.0版）を加工して作成; the build stops when the data reaches a year the list does not cover) and `prefecture` / `prefecture_en`. The published `counters.csv` adds `prefecture_en` and `municipality_en` (e.g. Yokohama-shi Tsurumi-ku) from `data/municipalities_en.csv`, made by `scripts/make_municipalities_en.py` from the MIC local government code list (出典：「全国地方公共団体コード」（総務省）（https://www.soumu.go.jp/denshijiti/code.html）を加工して作成, for the type of municipality) and Wikidata's English labels (CC0, for the name); town names stay in Japanese. Column descriptions for the dataset page are in `kaggle/settings.json`; the cover image is drawn from the data by `scripts/cover.py`.
 
 ## Source and terms
 
@@ -146,5 +160,7 @@ Each station measures only some elements: an element it does not measure is blan
 Traffic volume data from the MLIT Traffic Volume API (reference values), provided by the Japan Road Traffic Information Center (JARTIC), processed by this repository. The JARTIC terms state compatibility with CC BY 4.0. This archive is not made or endorsed by MLIT or JARTIC.
 
 Weather: 出典：気象庁ホームページ（https://www.jma.go.jp/bosai/amedas/）のアメダス観測値を加工して作成. Observations from the Japan Meteorological Agency website, used under the JMA website terms (Public Data License 1.0, compatible with CC BY 4.0). Only observations are stored; no forecast or warning is redistributed. This archive is not made or endorsed by JMA.
+
+Road Traffic Census: 出典：「令和3年度全国道路・街路交通情勢調査（道路交通センサス）一般交通量調査 箇所別基本表」（国土交通省）（https://www.mlit.go.jp/road/census/r3/index.html）を加工して作成. Used under the MLIT website terms (Public Data License 1.0, compatible with CC BY 4.0). The tie between counters and census sections is made by this repository, not by MLIT. Observation addresses were located with the GSI address search (国土地理院).
 
 Code: MIT License.

@@ -1,7 +1,7 @@
 """Tests against records the API really sent (tests/fixtures_live_20261005.json, one per layer with counts and,
 where the layer had one, one with blanks): every field reaches the CSV, and build_kaggle.py turns the four
 layers into the English tables without losing a count, and make_kaggle_meta.py describes every column."""
-import csv, json, os, subprocess, sys, tempfile
+import csv, json, os, shutil, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import fetch
@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory() as tmp:
                     assert pd.isna(row["up_total"])
     assert str(h.up_missing_processing.dtype) == "Int8" and str(m.cam_preset_position.dtype) == "boolean"
     assert len(h) == len(FIX["t_travospublic_measure_1h"]) + len(FIX["t_travospublic_measure_1h_img"])
-    assert sorted(os.listdir(out)) == ["counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
+    assert sorted(os.listdir(out)) == ["census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
     # ten-day chunks: names do not depend on which days are present yet
     import build_kaggle
     assert [build_kaggle.chunk(d) for d in ("20261001", "20261010", "20261011", "20261020", "20261021", "20261031",
@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory() as tmp:
     r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     md = json.load(open(os.path.join(out, "dataset-metadata.json"), encoding="utf-8"))
-    FILES = ["counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
+    FILES = ["census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
     assert sorted(x["path"] for x in md["resources"]) == FILES
     for x in md["resources"]:
         names = [f["name"] for f in x["schema"]["fields"]]
@@ -84,6 +84,17 @@ with tempfile.TemporaryDirectory() as tmp:
     st = json.load(open(settings, encoding="utf-8"))
     assert set(st["files"]) == {x["path"] for x in md["resources"]}
     assert md["licenses"] == [{"name": "CC-BY-4.0"}] and len(md["keywords"]) <= 5
+    # the census table: section numbers keep their leading zero, one row per counter, speeds plausible
+    cen = pd.read_csv(os.path.join(out, "census_2021_counters.csv"), dtype={"census_section": str})
+    assert cen.census_section.str.fullmatch(r"\d{11}").all() and not cen.counter_id.duplicated().any()
+    assert len(cen) == 365, len(cen)  # the count stated in README.md, kaggle/description.md and make_kaggle_meta.py
+    assert cen.filter(like="speed").stack().dropna().between(1, 130).all() and (cen.sensor == "loop").all()
+    known = set(pd.read_csv(os.path.join(HERE, "..", "data", "counters.csv")).query("sensor == \"loop\"").counter_id)
+    assert set(cen.counter_id) <= known
+    os.remove(os.path.join(out, "census_2021_counters.csv"))
+    r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
+    assert r.returncode != 0 and "census_2021_counters.csv" in (r.stderr + r.stdout), r.stderr
+    shutil.copy(os.path.join(HERE, "..", "data", "census_2021_counters.csv"), out)
     h.assign(extra=1).to_parquet(os.path.join(out, "hourly_2026-10_01-10.parquet"), index=False)
     r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
     assert r.returncode != 0 and "without a description" in (r.stderr + r.stdout), r.stderr
