@@ -99,7 +99,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ ! -f docs/figures/vs_usual_light.png ] || [[ "$d" =~ ^(01|11|21)$ ]]; then
             python scripts/figures.py _build docs/figures
             latest=$(ls _build/hourly_*.parquet | sort | tail -1)
-            python scripts/cover.py "$latest" _build/counters.csv docs/figures/map.jpg
+            python scripts/cover.py "$latest" _build/counters.csv data/japan_land.json docs/figures/map.jpg
             echo "FIGURES=true" >> "$GITHUB_ENV"
           fi
           # traffic in the rain (needs the AMeDAS files of the amedas-* releases), with the ten-day figures
