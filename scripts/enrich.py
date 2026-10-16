@@ -1,7 +1,7 @@
 """Columns and files that build_kaggle.py adds on top of the source's columns: the calendar (days off, runs of days
 off, customary breaks), a baseline of each counter built only from earlier days, and the nearest AMeDAS weather.
 
-Calendar (per JST date; calendar.csv and three columns on every traffic row)
+Calendar (per JST date; calendar.csv and three columns on every hourly traffic row)
   day_off          Saturday, Sunday or a national holiday (data/holidays_jp.csv, Cabinet Office)
   days_off_in_run  length of the run of consecutive days off that holds the date (2 = an ordinary weekend,
                    3 = a three-day weekend, 0 on a working day)
@@ -11,7 +11,7 @@ Calendar (per JST date; calendar.csv and three columns on every traffic row)
   both a substitute holiday (振替休日) and a citizens' holiday between two holidays (国民の休日) "休日"; the two are
   told apart by the rule of the Holiday Act: a "休日" between two named holidays is a citizens' holiday.
 
-Baseline (two columns on every traffic row)
+Baseline (two columns on every hourly traffic row)
   baseline_vehicles  median of `vehicles` of the same counter and sensor, at the same time of day, on the most recent
                      NBASE earlier days of the same day class within LOOKBACK days before the row's day (at least
                      MINBASE of them). Day class = the weekday (0 Monday ... 6 Sunday), with national holidays counted
@@ -19,7 +19,7 @@ Baseline (two columns on every traffic row)
                      Only days before the row's day are read, so the column can be used as a feature for forecasting.
   vs_baseline        vehicles / baseline_vehicles (empty when either is empty or the baseline is 0)
 
-Weather (hourly traffic files: four columns; weather_hourly_*.parquet and weather_stations.csv: the AMeDAS archive)
+Weather (hourly traffic rows: four columns; weather_hourly_*.parquet and weather_stations.csv: the AMeDAS archive)
   Each counter takes, for each element, the nearest AMeDAS station that reports the element (the element appears in
   at least half of the station's hourly rows), if it is within the element's distance; counters.csv gets the
   station ID and distance. Only values with the normal quality flag (aqc 0) are kept. AMeDAS hour_start_jst (the
