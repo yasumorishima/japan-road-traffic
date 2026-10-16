@@ -34,6 +34,8 @@ LOOKBACK = 35
 NBASE = 4
 MINBASE = 3
 MIN_FILLED = 0.9  # share of weather values the join must find (see add_weather)
+# share of counters that must get a station (measured 2026-10-16: temperature and wind 2063 of 2069, rain 1754)
+MIN_STATION = {"precip_mm": 0.75, "temp_c": 0.9, "wind_ms": 0.9}
 CAL_MARGIN = 14  # days of the holiday list needed after the last day of data (runs of days off near the end)
 # traffic column, AMeDAS column, distance limit in km
 WEATHER = [("precip_mm", "precip_1h_mm", 10), ("temp_c", "temp_c", 20), ("wind_ms", "wind_ms", 20),
@@ -197,6 +199,7 @@ def nearest_stations(counters, st, has):
     lat = pd.to_numeric(counters.latitude, errors="coerce").to_numpy()
     lon = pd.to_numeric(counters.longitude, errors="coerce").to_numpy()
     D = km(lat, lon, st.lat, st.lon)
+    D = np.where(np.isfinite(D), D, np.inf)  # a station or counter without coordinates is never the nearest
     out = {}
     for col, el, lim in WEATHER:
         name = col.split("_")[0]
@@ -207,6 +210,8 @@ def nearest_stations(counters, st, has):
         near = np.isfinite(d) & (d <= lim)
         out[f"{name}_station_id"] = pd.array(np.where(near, st.station_id.to_numpy()[j], np.nan), "Int32")
         out[f"{name}_station_km"] = pd.array(np.where(near, np.round(d, 2), np.nan), "Float32")
+        if col in MIN_STATION and len(counters) >= 100 and near.mean() < MIN_STATION[col]:
+            sys.exit(f"{col}: only {near.mean():.1%} of the counters got a station within {lim} km")
     return pd.DataFrame(out, index=counters.index)
 
 

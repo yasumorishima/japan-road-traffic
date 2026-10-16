@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import enrich
+import enrich, tempfile
 
 HOL = os.path.join(HERE, "..", "data", "holidays_jp.csv")
 cal = enrich.calendar(HOL)
@@ -119,4 +119,42 @@ try:
 except SystemExit as e:
     assert "got a value" in str(e)
 enrich.add_weather(big.copy(), w, near)
+
+# 4. stations: nearest one that reports the element, within its limit; values flagged in the source are blanked
+import amedas
+with tempfile.TemporaryDirectory() as tmp:
+    rows = []
+    for h in range(24):
+        t = f"20261005{h:02d}00"
+        rows.append({"obs_time_jst": t, "hour_start_jst": t, "station_id": 1, "precip_1h_mm": 2.0,
+                     "precip_1h_mm_aqc": 0 if h != 5 else 4})                       # 5.6 km: rain only
+        rows.append({"obs_time_jst": t, "hour_start_jst": t, "station_id": 2, "precip_1h_mm": 3.0, "precip_1h_mm_aqc": 0,
+                     "temp_c": 20.0, "temp_c_aqc": 0, "wind_ms": 1.0, "wind_ms_aqc": 0})  # 15 km
+        rows.append({"obs_time_jst": t, "hour_start_jst": t, "station_id": 3, "precip_1h_mm": 9.0, "precip_1h_mm_aqc": 0,
+                     "temp_c": 9.0, "temp_c_aqc": 0, "wind_ms": 9.0, "wind_ms_aqc": 0})   # no coordinates
+    amedas.write_csv(os.path.join(tmp, "amedas_20261005.csv.gz"), rows, amedas.COLUMNS)
+    amedas.write_csv(os.path.join(tmp, "amedas_stations_202610.csv.gz"),
+                     [{"station_id": 1, "type": "C", "elems": "01000000", "lat": 35.05, "lon": 139.0},
+                      {"station_id": 2, "type": "C", "elems": "11100000", "lat": 35.135, "lon": 139.0},
+                      {"station_id": 3, "type": "C", "elems": "11100000", "lat": None, "lon": None}],
+                     amedas.STATION_COLUMNS)
+    w, st, has = enrich.load_weather(tmp)
+    assert bool(has.loc[1, "precip_1h_mm"]) and not has.loc[1, "temp_c"] and bool(has.loc[2, "temp_c"])
+    assert pd.isna(w.set_index(["time_jst", "station_id"]).loc[(pd.Timestamp("2026-10-05 05:00"), 1), "precip_1h_mm"])
+    cn = pd.DataFrame({"latitude": [35.0, 35.0, 36.0, None], "longitude": [139.0, 139.0, 139.0, 139.0]})
+    nr = enrich.nearest_stations(cn, st, has)
+    assert nr.precip_station_id.tolist()[:2] == [1, 1] and nr.temp_station_id.tolist()[:2] == [2, 2], nr
+    assert abs(float(nr.precip_station_km.iloc[0]) - 5.56) < 0.05 and abs(float(nr.temp_station_km.iloc[0]) - 15.01) < 0.05
+    assert nr.iloc[2:][["precip_station_id", "temp_station_id"]].isna().all().all()  # 100 km away / no coordinates
+    assert nr.snow_station_id.isna().all()
+    # rain 15 km away is beyond its 10 km limit
+    nr2 = enrich.nearest_stations(cn.iloc[:1], st[st.station_id != 1], has)
+    assert pd.isna(nr2.precip_station_id.iloc[0]) and nr2.temp_station_id.iloc[0] == 2
+    # too few counters with a station stops the build
+    far = pd.DataFrame({"latitude": [40.0] * 100, "longitude": [139.0] * 100})
+    try:
+        enrich.nearest_stations(far, st, has)
+        raise AssertionError("no station for every counter passed")
+    except SystemExit as e:
+        assert "got a station" in str(e)
 print("test_enrich: ALL PASS")
