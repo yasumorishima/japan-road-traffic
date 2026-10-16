@@ -75,7 +75,9 @@ with tempfile.TemporaryDirectory() as tmp:
                     assert pd.isna(row["up_total"])
     assert str(h.up_missing_processing.dtype) == "Int8" and str(m.cam_preset_position.dtype) == "boolean"
     assert len(h) == len(FIX["t_travospublic_measure_1h"]) + len(FIX["t_travospublic_measure_1h_img"])
-    assert sorted(os.listdir(out)) == ["census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
+    assert sorted(os.listdir(out)) == ["calendar.csv", "census_2021_counters.csv", "counters.csv",
+                                       "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet",
+                                       "weather_hourly_2026-10_01-10.parquet", "weather_stations.csv"]
     # ten-day chunks: names do not depend on which days are present yet
     import build_kaggle
     assert [build_kaggle.chunk(d) for d in ("20261001", "20261010", "20261011", "20261020", "20261021", "20261031",
