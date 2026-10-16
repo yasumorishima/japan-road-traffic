@@ -12,6 +12,8 @@ entered on the dataset page carry over to later versions.
                                   municipality names added (data/municipalities_en.csv)
   census_2021_counters.csv        365 loop counters tied to their 2021 Road Traffic Census section (route, lanes, speed
                                   limit, 2021 travel speeds), copied from data/ (made by scripts/census/)
+  road_graph_2021.csv             road distance between those counters on the census road network (pairs within
+                                  60 km), copied from data/ (made by scripts/census/build_graph.py)
 
 Derived columns are appended after the source's columns: vehicles per direction and in total (blank when a
 permanent counter flags a fault, because flagged hours are unreliable even when they carry counts), one flag column,
@@ -245,6 +247,7 @@ def main():
     pd.concat([cen, near.reset_index(drop=True).set_axis(cen.index)], axis=1).to_csv(
         os.path.join(a.out, "counters.csv"), index=False, lineterminator="\n")
     shutil.copy(os.path.join(ROOT, "data", "census_2021_counters.csv"), a.out)
+    shutil.copy(os.path.join(ROOT, "data", "road_graph_2021.csv"), a.out)
     lo, hi = pd.Timestamp(first_day).date(), pd.Timestamp(last_day).date()
     cal[(cal.date >= lo) & (cal.date <= hi)].to_csv(os.path.join(a.out, "calendar.csv"), index=False,
                                                     lineterminator="\n")

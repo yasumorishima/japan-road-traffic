@@ -135,6 +135,24 @@ peak-hour share differs by more than 1 point for 3.8% of the kept pairs, against
 tighten the rule, so it is not independent of it); and, not used by the rule, where a counter's up and down large-vehicle shares
 differ by more than 2 points, the census shows the same side heavier for 93% (so both use the same up and down). The speeds are 2021 values, not today's, and the column `match_vol_ratio` describes the matching, not traffic growth.
 
+### Road graph
+
+`data/road_graph_2021.csv` gives the road distance between those 365 counters, the input a graph model of traffic needs
+(the role the sensor adjacency plays in PEMS-BAY or METR-LA). The census lists, for each end of each section, the section
+it connects to; `scripts/census/build_graph.py` joins all 99,417 census sections (expressways, national highways,
+prefectural and designated-city roads) into one network on those links and takes the shortest path between counters.
+One row per pair within 60 km by road (1,729 pairs; 351 of the 365 counters have at least one), with the straight-line
+distance, `same_route`, and `direct` (no other counter in between; 1,022 pairs). A census section number names a survey
+unit that can span several sections (route 29 in Hyogo: one unit runs over ten sections in three cities), so a counter is
+placed at the middle of the unit's sections in its own municipality; `placed_km` in `census_2021_counters.csv` is the
+length of that stretch.
+
+Checks: a straight line cannot be longer than the road, and it is longer by more than the placement allows for 3 of the
+1,729 pairs (by 0.7-1.4 km; census lengths there look short). Not used to build it: between two counters at the same
+straight-line distance, the hour-by-hour departure from their usual traffic (`vs_baseline`) moves together more when the
+road distance is shorter (Spearman with the correlation of the two series -0.26 for road distance against -0.13 for straight-line
+distance at 20-40 km, -0.15 against -0.01 at 40-60 km; also for counters on different routes; `scripts/census/graph_validate.py`).
+
 The Kaggle notebook [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffic-a-first-look) sets these speeds against the 2026 counts: ranked by vehicles per lane in the busiest rush hour of an average weekday, the quietest fifth of the tied counters hardly slows at rush hour and the busiest fifth loses about 15% of its daytime speed (rank correlation 0.58 over 363 counters; it holds within two-lane and within four-lane roads). This compares roads; it does not say a road was congested on any day of the archive.
 
 ## Caveats
