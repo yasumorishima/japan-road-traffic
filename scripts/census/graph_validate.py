@@ -45,9 +45,15 @@ O["rr"] = np.where(~np.isfinite(O.road), "none<=60", np.where(O.road / O.line < 
 print(O.pivot_table(index="lb", columns="rr", values="r", aggfunc=["median", "count"], observed=True).round(3).to_string())
 # within straight-line bands, does a shorter road distance go with a higher correlation?
 import scipy.stats as st
-for lo, hi in ((0, 10), (10, 20), (20, 40), (40, 60)):
-    q = O[(O.line > lo) & (O.line <= hi)].copy()
-    q["road_c"] = np.minimum(q.road, 120.0)
-    print(f"line {lo}-{hi} km: n={len(q)} spearman(r, road capped 120)={st.spearmanr(q.r, q.road_c).statistic:.3f}"
-          f" spearman(r, line)={st.spearmanr(q.r, q.line).statistic:.3f}")
+C2 = C.set_index("counter_id").route_ja
+O["same"] = C2.loc[O.a].to_numpy() == C2.loc[O.b].to_numpy()
+# all pairs (a pair with no road path within 60 km counts as 120 km, so far bands mostly measure "reachable or not"),
+# then only pairs with a road path, then pairs on different routes
+for label, sel in (("all", O.index == O.index), ("with a road path", np.isfinite(O.road)),
+                   ("different routes", ~O.same)):
+    for lo, hi in ((0, 10), (10, 20), (20, 40), (40, 60)):
+        q = O[sel & (O.line > lo) & (O.line <= hi)].copy()
+        q["road_c"] = np.minimum(q.road, 120.0)
+        print(f"{label:17s} line {lo}-{hi} km: n={len(q)} spearman(r, road)={st.spearmanr(q.r, q.road_c).statistic:.3f}"
+              f" spearman(r, line)={st.spearmanr(q.r, q.line).statistic:.3f}")
 O.to_csv("census/graph_validate_pairs.csv", index=False)

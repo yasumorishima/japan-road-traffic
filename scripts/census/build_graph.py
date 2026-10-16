@@ -2,9 +2,10 @@
 census/census_r3_placed.csv (census_r3_match.csv plus where on the census road network each counter was placed).
 
 The network is every section of the 2021 census 箇所別基本表 (all road types: expressways, national highways, prefectural
-and designated-city roads; 99,417 sections). Each section has a start and an end point, and the section length (column 23,
-km, 0.1 km steps; 0.0 means shorter than 0.05 km). Points are merged when the census says they are the same place
-(connection codes, kasyorep.pdf (4)):
+and designated-city roads; 99,417 sections) except the sections the census marks impassable to vehicles (区間種別 6,
+交通不能区間). Each section has a start and an end point, and the section length (column 23, km, 0.1 km steps; 0.0 means
+shorter than 0.05 km). Points are merged when the census says they are the same place (connection codes,
+kasyorep.pdf (4)):
   A  consecutive section numbers of one route in one prefecture (first 7 digits) whose end and start descriptions agree:
      the same connection code and the same connected section (codes 1-4), the same pair of municipalities (6), or the
      same name (5, 7, 9); never across a dead end (8);
@@ -15,23 +16,23 @@ km, 0.1 km steps; 0.0 means shorter than 0.05 km). Points are merged when the ce
 Checked and not used: also joining consecutive sections whose connection codes agree but name different sections of
 one other route (an interchange spread over two sections) made 179 counter pairs geometrically impossible instead of 3.
 National highways alone gave a graph with 1,040 pieces (a counter pair joined only through a prefectural road had no
-path); with all road types 351 of the 365 counters have another counter within 60 km by road.
+path).
 
 Where a counter sits: the census values of a section are those of its survey unit. Every section names the observation
 section of its unit (column 32), and census_section in census_2021_counters.csv is that observation section, but the
 observation point can be in any section of the unit (route 29 in Hyogo: unit 0100 runs over sections 0100-0190 across three
-cities; its address, 宍粟市山崎町須賀沢, is in 0180-0190). A counter is placed at the middle of the sections of its unit
-that lie in the counter's own municipality (column 18; all sections of the unit when none does), keeping the longest
-stretch joined end to start; placed_km is the length of that stretch, so the counter is within placed_km / 2 of the
-point used. road_km between two counters = half of each placed_km + the shortest path between the stretches' end points.
+cities; its address, 宍粟市山崎町須賀沢, is in 0180-0190). A counter is placed at the middle of a stretch: the sections of
+its unit that lie in the counter's own municipality (column 18) joined end to start, the stretch holding the observation
+section when there is one, else the longest. When no section of the unit is in the counter's municipality (a counter
+near a municipal border), all sections of the unit are used and placed_in_municipality is False. placed_km is the length
+of the stretch.
+road_km between two counters is the shortest path between the middles of their stretches: it may leave a stretch at any
+junction along it (the distance from the middle to that junction along the stretch, then the network).
 
 Checks (printed; the run stops if they fail): a straight line cannot be longer than the road, so line_km must be at most
-road_km + half of both placed_km + 0.5 km (3 of 1,729 pairs fail by 0.7-1.4 km on 2026-10-17: two on route 41 south of
-Toyama, one between routes 7 and 8 in Niigata; census lengths there look short); more than 1% failing stops the run.
+road_km + half of both placed_km + 0.5 km; more than 1% failing stops the run.
 direct: no third counter lies on the path (d(a,c) + d(c,b) <= d(a,b) + 0.2 km for none), the edges a graph model would
-usually take. Independent check (census/graph_validate.py, not used to build): within the same straight-line distance band
-the hourly 'vs_baseline' of two counters moves together more when the road distance is shorter (Spearman with road_km
--0.26 against -0.13 with line_km at 20-40 km, -0.15 against -0.01 at 40-60 km; also between counters on different routes).
+usually take. graph_validate.py is a check not used to build.
 usage (from the work directory): build_graph.py [max_road_km=60]"""
 import csv, glob, io, sys, collections
 import numpy as np, pandas as pd
@@ -47,6 +48,8 @@ for f in sorted(glob.glob("census/kasyo*.csv")):
 assert len(glob.glob("census/kasyo*.csv")) == 47 and len(rows) == 99417, len(rows)
 secs = sorted(rows); idx = {s: i for i, s in enumerate(secs)}; n = len(secs)
 L = np.array([float(rows[s][23]) for s in secs])
+passable = np.array([rows[s][20] != "6" for s in secs])
+print("impassable sections (区間種別 6) left out as edges:", int((~passable).sum()))
 parent = list(range(2 * n))  # point id: 2*i start, 2*i+1 end
 S_, E_ = 0, 1
 cnt = collections.Counter()
@@ -97,7 +100,8 @@ for s in secs:
 print("merges", dict(cnt))
 roots = sorted({find(p) for p in range(2 * n)}); rid = {r: i for i, r in enumerate(roots)}
 u = np.array([rid[find(2 * i)] for i in range(n)]); v = np.array([rid[find(2 * i + 1)] for i in range(n)])
-W = coo_matrix((np.r_[L, L], (np.r_[u, v], np.r_[v, u])), shape=(len(roots), len(roots))).tocsr()
+W = coo_matrix((np.r_[L[passable], L[passable]], (np.r_[u[passable], v[passable]], np.r_[v[passable], u[passable]])),
+               shape=(len(roots), len(roots))).tocsr()
 
 C = pd.read_csv("census/census_r3_match.csv", dtype={"census_section": str})
 P = pd.read_csv("repo/data/counters.csv", dtype={"municipality_code": str}).set_index("counter_id")
@@ -106,7 +110,7 @@ unit = collections.defaultdict(list)
 for s in secs:
     if rows[s][32]:
         unit[rows[s][32]].append(s)
-place, first, last, stat = [], [], [], collections.Counter()
+nodes, offs, first, last, plen, inmun, stat = [], [], [], [], [], [], collections.Counter()
 for c in C.itertuples():
     mem = sorted(unit.get(c.census_section, [c.census_section]))
     mun = P.municipality_code[c.counter_id]
@@ -120,21 +124,30 @@ for c in C.itertuples():
         else:
             chains.append(cur); cur = [b]
     chains.append(cur)
-    ch = max(chains, key=lambda q: sum(L[idx[s]] for s in q))
+    own = [q for q in chains if c.census_section in q]
+    ch = own[0] if own else max(chains, key=lambda q: sum(L[idx[s]] for s in q))
     stat["stretch not joined end to start"] += len(chains) > 1
-    place.append((rid[find(pt(ch[0], S_))], rid[find(pt(ch[-1], E_))], float(sum(L[idx[s]] for s in ch))))
-    first.append(ch[0]); last.append(ch[-1])
+    pos = np.r_[0.0, np.cumsum([L[idx[s]] for s in ch])]  # chain points: start of ch[0], then the end of each section
+    nodes.append([rid[find(pt(ch[0], S_))]] + [rid[find(pt(s, E_))] for s in ch])
+    offs.append(np.abs(pos - pos[-1] / 2))
+    first.append(ch[0]); last.append(ch[-1]); plen.append(pos[-1]); inmun.append(bool(inm))
 print("placement", dict(stat))
-C["placed_from_section"] = first; C["placed_to_section"] = last; C["placed_km"] = [round(p[2], 1) for p in place]
-src = np.unique([p[0] for p in place] + [p[1] for p in place])
-D = dijkstra(W, directed=False, indices=src, limit=MAXKM + 30)
-row = {p: k for k, p in enumerate(src)}
+C["placed_from_section"] = first; C["placed_to_section"] = last; C["placed_km"] = np.round(plen, 1)
+C["placed_in_municipality"] = inmun
+targets = np.unique(np.concatenate([np.array(q) for q in nodes])); tcol = {p: k for k, p in enumerate(targets)}
+DT = np.full((len(targets), len(targets)), np.inf)
+for lo in range(0, len(targets), 100):  # distances among chain points only, in batches (the full rows would not fit)
+    D = dijkstra(W, directed=False, indices=targets[lo:lo + 100], limit=MAXKM + 30)
+    DT[lo:lo + 100] = D[:, targets]
 k = len(C)
 R = np.full((k, k), np.inf)
 for i in range(k):
+    ti = np.array([tcol[p] for p in nodes[i]])
     for j in range(k):
-        (sa, ea, la), (sb, eb, lb) = place[i], place[j]
-        R[i, j] = 0.0 if i == j else la / 2 + min(D[row[pa], pb] for pa in (sa, ea) for pb in (sb, eb)) + lb / 2
+        if i == j:
+            R[i, j] = 0.0; continue
+        tj = np.array([tcol[p] for p in nodes[j]])
+        R[i, j] = (offs[i][:, None] + DT[np.ix_(ti, tj)] + offs[j][None, :]).min()
 near = (R <= MAXKM) | (R.T <= MAXKM)  # the search stops at MAXKM + 30, so only distances beyond it may differ by direction
 assert np.allclose(R[near], R.T[near])
 lat = np.radians(P.loc[C.counter_id, "latitude"].to_numpy()); lon = np.radians(P.loc[C.counter_id, "longitude"].to_numpy())
@@ -148,14 +161,13 @@ for i in range(k):
         others = [m for m in range(k) if m not in (i, j)]
         direct = not np.any(R[i, others] + R[others, j] <= R[i, j] + 0.2)
         out.append(dict(counter_a=C.counter_id[i], counter_b=C.counter_id[j], road_km=round(R[i, j], 1), line_km=round(line, 1),
-                        same_route=C.route_ja[i] == C.route_ja[j], direct=direct,
-                        _slack=place[i][2] / 2 + place[j][2] / 2))
+                        same_route=C.route_ja[i] == C.route_ja[j], direct=direct, _slack=plen[i] / 2 + plen[j] / 2))
 O = pd.DataFrame(out)
+assert (O.counter_a < O.counter_b).all() and O.road_km.gt(0).all() and not O.duplicated(["counter_a", "counter_b"]).any()
 bad = O[O.line_km > O.road_km + O._slack + 0.5]
 print(f"pairs within {MAXKM} km by road: {len(O)}, direct {int(O.direct.sum())}, counters with a neighbour "
       f"{len(set(O.counter_a) | set(O.counter_b))}/{k}, impossible {len(bad)}")
-print(bad.to_string())
+print(bad.assign(over=(bad.line_km - bad.road_km - bad._slack).round(2)).to_string())
 assert len(bad) <= 0.01 * len(O), "too many pairs with a straight line longer than the road"
-assert O.road_km.ge(0).all() and not O.duplicated(["counter_a", "counter_b"]).any()
 O.drop(columns="_slack").to_csv("census/road_graph_2021.csv", index=False)
 C.to_csv("census/census_r3_placed.csv", index=False)

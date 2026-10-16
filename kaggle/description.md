@@ -17,7 +17,7 @@ Notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffi
 | `weather_stations.csv` | AMeDAS stations: ID, location, altitude, names in Japanese, kana and English |
 | `calendar.csv` | One row per day: holidays with their Japanese and English names, days off, the length of the run of days off, the evening before a day off, Obon and New Year |
 | `census_2021_counters.csv` | 365 permanent counters on national highways tied to their section of the 2021 Road Traffic Census: route name (Japanese and English, e.g. National Route 5), lanes, speed limit, and 2021 rush-hour and off-peak travel speeds per direction. The tie is inferred (see the `match_` columns); the speeds are 2021 values, not live ones |
-| `road_graph_2021.csv` | Road distance between those 365 counters on the census road network, for graph models (spatio-temporal GNNs and the like): one row per pair within 60 km by road (1,729 pairs; 351 counters have at least one), the straight-line distance, whether both are on the same route, and `direct` (no other counter in between, 1,022 pairs) |
+| `road_graph_2021.csv` | Road distance between those 365 counters on the census road network, for graph models (spatio-temporal GNNs and the like): one row per pair within 60 km by road (1,747 pairs; 352 counters have at least one), the straight-line distance, whether both are on the same route, and `direct` (no other counter in between, 990 pairs) |
 
 Read a whole resolution at once with `pd.concat(pd.read_parquet(p) for p in sorted(glob.glob(".../hourly_*.parquet")))`.
 

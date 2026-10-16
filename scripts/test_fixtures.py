@@ -113,17 +113,15 @@ with tempfile.TemporaryDirectory() as tmp:
         cen[c] = cen[c].astype(str).str.zfill(11)
         assert cen[c].str.fullmatch(r"\d{11}").all() and (cen[c].str[:2] == cen.census_section.str[:2]).all(), c
     assert (cen.placed_from_section <= cen.placed_to_section).all() and cen.placed_km.between(0.1, 30).all()
-    # the road graph: pairs of tied counters, each once, within 60 km; line_km recomputed from counters.csv
+    assert cen.placed_in_municipality.dtype == bool and cen.placed_in_municipality.mean() > 0.95
+    # the road graph: pairs of tied counters, each once, within 60 km. Only the files themselves are read here: this
+    # test runs before every collect, and counters.csv takes each seen counter's coordinates from the API daily, so a
+    # check against it could stop collection over a moved counter (line_km is checked when the graph is built)
     g = pd.read_csv(os.path.join(out, "road_graph_2021.csv"))
     assert list(g.columns) == ["counter_a", "counter_b", "road_km", "line_km", "same_route", "direct"]
     assert (g.counter_a < g.counter_b).all() and not g.duplicated(["counter_a", "counter_b"]).any()
     assert set(g.counter_a) | set(g.counter_b) <= set(cen.counter_id) and g.road_km.between(0.1, 60).all()
-    assert g.direct.dtype == bool and g.same_route.dtype == bool and len(g) > 1000
-    xy = pd.read_csv(os.path.join(HERE, "..", "data", "counters.csv")).query("sensor == \"loop\"").set_index("counter_id")
-    la1, lo1, la2, lo2 = (np.radians(xy.loc[g[c], k].to_numpy()) for c, k in
-                          (("counter_a", "latitude"), ("counter_a", "longitude"), ("counter_b", "latitude"), ("counter_b", "longitude")))
-    line = 2 * 6371.0 * np.arcsin(np.sqrt(np.sin((la2 - la1) / 2) ** 2 + np.cos(la1) * np.cos(la2) * np.sin((lo2 - lo1) / 2) ** 2))
-    assert np.abs(line - g.line_km.to_numpy()).max() <= 0.051
+    assert g.direct.dtype == bool and g.same_route.dtype == bool and len(g) > 1000 and g.line_km.ge(0).all()
     half = cen.set_index("counter_id").placed_km / 2
     over = g.line_km > g.road_km + half.loc[g.counter_a].to_numpy() + half.loc[g.counter_b].to_numpy() + 0.5
     assert over.sum() <= 0.01 * len(g), over.sum()  # a straight line cannot be much longer than the road
