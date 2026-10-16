@@ -10,6 +10,7 @@ Notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffi
 
 | File | What |
 |---|---|
+| `daily_summary.csv` | **Start here.** One row per counter and day (about 2,000 counters): vehicles, large vehicles, the busiest hour, the usual count for that weekday (`baseline_vehicles`, `vs_baseline`), rain and temperature at the nearest weather station, and the calendar (holidays, runs of days off). Day totals are given only for days with all 24 hours (`hours`) |
 | `hourly_YYYY-MM_DD-DD.parquet` | Nationwide, hourly, one file per ten days (days 01-10, 11-20, 21 to the end of the month, JST): permanent and CCTV counters |
 | `five_minute_kanto_YYYY-MM_DD-DD.parquet` | Kanto box, every five minutes, one file per ten days, with camera status for CCTV rows |
 | `counters.csv` | One row per counter: location, prefecture and municipality in Japanese and English (`prefecture_en`, `municipality_en`, e.g. Yokohama-shi Tsurumi-ku), town (Japanese), last day seen (read `municipality_code` as text to keep its leading zero) |

@@ -36,6 +36,9 @@ jobs:
           python scripts/test_collect.py
           python scripts/test_fixtures.py
           python scripts/test_enrich.py
+          python scripts/test_daily.py
+      - name: Planted defects (each must make test_daily.py fail)
+        run: bash scripts/mutate_daily.sh
       - name: Planted defects (each must make test_enrich.py fail)
         run: |
           set -u
@@ -102,3 +105,4 @@ jobs:
           python scripts/make_kaggle_meta.py _build --settings /tmp/settings.json
           ls -la _build | head -60
           python scripts/verify_enrich.py _build _weather
+          python scripts/verify_daily.py _build

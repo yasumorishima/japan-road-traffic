@@ -233,6 +233,34 @@ CENSUS_COLS = {
                                "which can lie partly in a neighbouring municipality"),
 }
 
+DAILY_DESC = ("The small file to start from: one row per counter, sensor and day (JST), summed from the hourly files. "
+              "Day totals are given only when all 24 hours carry the value (see hours); join counters.csv on "
+              "(counter_id, sensor) for the location and census_2021_counters.csv for the route.")
+FULL = " Empty unless all 24 hours of the day carry it"
+DAILY_COLS = {
+    "date": "Day, JST (YYYY-MM-DD); a day runs from 00:00 to 24:00",
+    "counter_id": "Counter ID (常時観測点コード); join with sensor",
+    "sensor": "loop (permanent counter) or cctv (CCTV camera counted by image recognition)",
+    "road_type": "1 = expressway, 3 = national highway",
+    "prefecture_en": "Prefecture in English",
+    "weekday": CALENDAR_COLS["weekday"],
+    "is_holiday": CALENDAR_COLS["is_holiday"],
+    "day_off": CALENDAR_COLS["day_off"],
+    "days_off_in_run": CALENDAR_COLS["days_off_in_run"],
+    "customary_break": CALENDAR_COLS["customary_break"],
+    "hours": ("Number of hours of the day with a vehicle count (0-24). Below 24 when an hour is missing at the source "
+              "or a permanent counter flags a fault; 0 for a counter that reported only flagged or empty hours"),
+    "vehicles": "Vehicles in the day, both directions." + FULL,
+    "large_vehicles": "Large vehicles in the day, both directions (up_large + down_large)." + FULL,
+    "peak_hour": "Hour (0-23, the hour starting then) with the most vehicles; the earliest on a tie." + FULL.replace(" carry it", " carry a count"),
+    "baseline_vehicles": ("Sum over the day of the hourly baseline (the usual count of the same counter, hour and weekday "
+                          "from earlier days; see baseline_vehicles in the hourly files)." + FULL),
+    "vs_baseline": "vehicles / baseline_vehicles for the day (1.2 = 20% more than usual)",
+    "precip_mm": "Rain over the day at the counter's nearest AMeDAS station within 10 km, mm." + FULL,
+    "wet_hours": "Hours of the day with at least 1 mm of rain at that station." + FULL.replace(" carry it", " carry a rain value"),
+    "temp_c": "Mean of the 24 hourly temperatures at the nearest AMeDAS station within 20 km, deg C." + FULL,
+}
+
 GRAPH_DESC = ("Road distance between the 365 counters of census_2021_counters.csv on the 2021 Road Traffic Census road "
               "network (all census roads: expressways, national highways, prefectural and designated-city roads, except "
               "sections impassable to vehicles; sections joined where the census describes their ends as the same "
@@ -285,6 +313,9 @@ def main():
             cols = pd.read_csv(p, nrows=0).columns.tolist()
             desc = CENSUS_DESC
             table = CENSUS_COLS
+        elif n == "daily_summary.csv":
+            cols = pd.read_csv(p, nrows=0).columns.tolist()
+            desc, table = DAILY_DESC, DAILY_COLS
         elif n == "road_graph_2021.csv":
             cols = pd.read_csv(p, nrows=0).columns.tolist()
             desc, table = GRAPH_DESC, GRAPH_COLS
@@ -311,7 +342,8 @@ def main():
         resources.append({"path": n, "description": desc,
                           "schema": {"fields": [{"name": c, "description": table[c]} for c in cols]}})
         files[n] = {"description": desc, "columns": {c: table[c] for c in cols}}
-    need = {"counters.csv", "census_2021_counters.csv", "road_graph_2021.csv", "calendar.csv", "weather_stations.csv"}
+    need = {"counters.csv", "census_2021_counters.csv", "road_graph_2021.csv", "calendar.csv", "weather_stations.csv",
+            "daily_summary.csv"}
     if not any(n.startswith("hourly_") for n in files) or not any(n.startswith("weather_hourly_") for n in files) \
             or not need <= set(files):
         sys.exit(f"the build lacks an hourly or weather file or one of {sorted(need)}")

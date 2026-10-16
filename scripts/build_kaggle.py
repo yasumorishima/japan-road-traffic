@@ -22,11 +22,13 @@ then, in the hourly files, the calendar, a baseline from earlier days and the ne
 The five-minute files keep their columns: with five more, a ten-day file (573,000 rows x 47 columns, 26.9 million
 cells) would pass the size at which Kaggle's preview failed before (1.1 million rows x 24 columns, 26.4 million).
   calendar.csv                    one row per day of the data: days off, runs of days off, holiday names
-  weather_hourly_YYYY-MM_DD-DD.parquet, weather_stations.csv   the AMeDAS archive (amedas-* releases)"""
+  weather_hourly_YYYY-MM_DD-DD.parquet, weather_stations.csv   the AMeDAS archive (amedas-* releases)
+  daily_summary.csv               one row per counter, sensor and day from the hourly files (daily.py): totals for
+                                  days with all 24 hours, with the calendar, the baseline and the weather"""
 import argparse, calendar, glob, os, re, shutil, sys
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import enrich
+import daily, enrich
 
 KEY = {"時間コード": "time_code", "常時観測点コード": "counter_id", "道路種別": "road_type",
        "地方整備局等番号": "regional_bureau", "開発建設部／都道府県コード": "sub_region"}
@@ -205,6 +207,7 @@ def main():
     near = enrich.nearest_stations(cen, stations, has)
     near.index = pd.MultiIndex.from_arrays([cen.counter_id.astype("int32"), cen.sensor], names=["counter_id", "sensor"])
     prev = None
+    days = []  # daily_summary.csv, built from each hourly chunk
     first_day = last_day = None
     groups = {}
     for p in glob.glob(os.path.join(a.src, "**", "*.csv.gz"), recursive=True):
@@ -239,6 +242,7 @@ def main():
             df = enrich.add_calendar(df, cal)
             prev = enrich.baseline(df, cal, prev)
             df = enrich.add_weather(df, w, near)
+            days.append(daily.summarise(df))
         name = ("hourly" if res == "1h" else "five_minute_kanto") + f"_{month}.parquet"  # month = 'YYYY-MM_DD-DD'
         df.to_parquet(os.path.join(a.out, name), index=False, compression="zstd", row_group_size=50_000)
         print(f"{name}: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)
@@ -257,6 +261,11 @@ def main():
                      row_group_size=50_000)
         print(f"weather_hourly_{name}.parquet: {len(g):,} rows, {g.time_jst.dt.date.nunique()} days", flush=True)
     stations.to_csv(os.path.join(a.out, "weather_stations.csv"), index=False, lineterminator="\n")
+    dd = pd.concat(days, ignore_index=True).sort_values(["date", "counter_id", "sensor"], kind="stable")
+    if dd.duplicated(["date", "counter_id", "sensor"]).any():
+        sys.exit("daily summary: a (date, counter, sensor) row came from two chunks")
+    dd.to_csv(os.path.join(a.out, "daily_summary.csv"), index=False, lineterminator="\n")
+    print(f"daily_summary.csv: {len(dd):,} rows, {int(dd.vehicles.notna().sum()):,} full days", flush=True)
 
 if __name__ == "__main__":
     main()
