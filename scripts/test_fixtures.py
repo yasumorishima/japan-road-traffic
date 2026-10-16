@@ -37,8 +37,9 @@ with tempfile.TemporaryDirectory() as tmp:
     # one AMeDAS station near the test counters (139.6, 35.4) with the day of the fixtures, and the station table
     wdir = os.path.join(tmp, "wx"); os.makedirs(wdir)
     wrows = [{"obs_time_jst": f"20261005{h + 1:02d}00" if h < 23 else "202610060000",
-              "hour_start_jst": f"20261005{h:02d}00", "station_id": 46106, "temp_c": 20 + h / 10, "temp_c_aqc": 0,
-              "precip_1h_mm": 1.5, "precip_1h_mm_aqc": 0 if h != 3 else 5, "wind_ms": 3.0, "wind_ms_aqc": 0}
+              "hour_start_jst": f"20261005{h:02d}00", "station_id": 46106, "temp_c": 20 + h / 10,
+              "temp_c_aqc": 0 if h != 8 else 5,  # the fixtures' hour (08:00) has a flagged temperature
+              "precip_1h_mm": 1.5 + h, "precip_1h_mm_aqc": 0, "wind_ms": 3.0, "wind_ms_aqc": 0}
              for h in range(24)]
     amedas.write_csv(os.path.join(wdir, "amedas_20261005.csv.gz"), wrows, amedas.COLUMNS)
     amedas.write_csv(os.path.join(wdir, "amedas_stations_202610.csv.gz"),
@@ -89,7 +90,8 @@ with tempfile.TemporaryDirectory() as tmp:
     r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     md = json.load(open(os.path.join(out, "dataset-metadata.json"), encoding="utf-8"))
-    FILES = ["census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
+    FILES = ["calendar.csv", "census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet",
+             "hourly_2026-10_01-10.parquet", "weather_hourly_2026-10_01-10.parquet", "weather_stations.csv"]
     assert sorted(x["path"] for x in md["resources"]) == FILES
     for x in md["resources"]:
         names = [f["name"] for f in x["schema"]["fields"]]
@@ -156,11 +158,10 @@ with tempfile.TemporaryDirectory() as tmp:
                                    + enrich.CAL_ROW + enrich.BASE_ROW + ([] if five else enrich.WEATHER_ROW)), name
         # 2026-10-05 is a holiday in hol.csv after a weekend: a run of three days off
         assert d.day_off.all() and (d.days_off_in_run == 3).all() and d.customary_break.isna().all(), name
-        if not five:  # the station is about 6 km away: within every limit; hour 03 is flagged in the source, so empty
-            lp = d[d.sensor == "loop"].set_index(d.time_jst[d.sensor == "loop"].dt.hour)
-            assert lp.precip_mm.notna().any() and (lp.precip_mm.dropna() == 1.5).all() and lp.precip_mm.loc[[3]].isna().all()
-            assert (lp.temp_c.astype(float).round(2) == (20 + lp.index / 10).to_numpy().round(2)).all()
-            assert d.snow_depth_cm.isna().all() and d.baseline_vehicles.isna().all()  # one day: no earlier days
+        if not five:  # the station is about 6 km away: within every limit; rain of 08:00-09:00 is 9.5 mm
+            assert (d.time_jst.dt.hour == 8).all() and (d.precip_mm == 9.5).all() and (d.wind_ms == 3.0).all()
+            assert d.temp_c.isna().all() and d.snow_depth_cm.isna().all()  # flagged in the source; no snow station
+        assert d.baseline_vehicles.isna().all() and d.vs_baseline.isna().all()  # one day: no earlier days
         loop = d.sensor == "loop"
         for side in ("up", "down"):
             fl = d[[f"{side}_{x}" for x in ("power_failure", "loop_fault", "ultrasonic_fault", "missing")]]

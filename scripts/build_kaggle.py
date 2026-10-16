@@ -196,6 +196,7 @@ def main():
     hol, last_year = holidays(a.holidays)
     cal = enrich.calendar(a.holidays)
     w, stations, has = enrich.load_weather(a.weather)
+    place = places(a.counters)  # checks the prefecture against its code before counters_en reads the names
     cen = counters_en(a.counters, a.names)
     near = enrich.nearest_stations(cen, stations, has)
     near.index = pd.MultiIndex.from_arrays([cen.counter_id.astype("int32"), cen.sensor], names=["counter_id", "sensor"])
@@ -212,7 +213,6 @@ def main():
         sys.exit("no release files found")
     enrich.check_span(cal, pd.Timestamp(last_day).date())
     os.makedirs(a.out, exist_ok=True)
-    place = places(a.counters)
     known = set(place)
     unknown = set()
     for (res, month), files in sorted(groups.items()):
