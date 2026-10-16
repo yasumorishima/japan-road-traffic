@@ -12,8 +12,8 @@ observation address only to the prefecture or the municipality (8 pairs: two in 
 point, one of them, counter 2110212, tied to a section about 10 km away; six to a city or town point). The
 distance to such a point does not place the section, so "within 3 km" would not hold for them.
 Third amendment (2026-10-17, found by the audit of the road graph, build_graph.py): two ties are swapped when neither
-counter's town name is in its census address and, swapped, both are, with volume and fingerprints still passing the rule
-(one case, on route 246 at the Kanagawa-Shizuoka border; see the comment above the loop)."""
+counter's town name is in its census address and, swapped, both are, with volume, fingerprints and the 3 km limit still
+passing (one case, on route 246 at the Kanagawa-Shizuoka border; see the comment above the loop)."""
 import csv, glob, io, json, re
 import numpy as np, pandas as pd
 PREF = ("北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県 茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県 新潟県 富山県 "
@@ -81,10 +81,16 @@ def town_in(cid, sec):
     t = norm(town.get(cid, "")); return len(t) >= 2 and t in rows[sec][1]
 
 
+# Only two-way swaps: a three-way rotation also exists (板橋区: 3310820, 3310930 and 3310920 each hold the next one's
+# section; all three fail the rule and stay out). A counter is swapped at most once, and the new pairs must still be
+# within the 3 km of the assignment.
 K = M[(M.lr < 0.15) & M.section.isin(rows)].set_index("counter_id")
 cand = [c for c in K.index if not town_in(c, K.section[c])]
+done = set()
 for i, a in enumerate(cand):
     for b in cand[i + 1:]:
+        if a in done or b in done:
+            continue
         sa, sb = K.section[a], K.section[b]
         if not (town_in(a, sb) and town_in(b, sa)):
             continue
@@ -92,12 +98,14 @@ for i, a in enumerate(cand):
         for c, s, o in ((a, sb, b), (b, sa, a)):
             lr = abs(np.log(cv[c] / num(rows[s][0][61])))
             fp = abs(K.up_c[c] - K.up_s[o]) < 2 and abs(K.dn_c[c] - K.dn_s[o]) < 0.05
-            new[c] = dict(section=s, lr=lr, km=km_to(c, s), up_s=K.up_s[o], dn_s=K.dn_s[o], ok=lr < 0.15 and fp)
+            km = km_to(c, s)
+            new[c] = dict(section=s, lr=lr, km=km, up_s=K.up_s[o], dn_s=K.dn_s[o], ok=lr < 0.15 and fp and km <= 3)
         print("swap candidate", a, sa, "<->", b, sb, {c: (round(v["lr"], 3), round(v["km"], 2), v["ok"]) for c, v in new.items()})
         if all(v["ok"] for v in new.values()):
             for c, v in new.items():
                 for k2 in ("section", "lr", "km", "up_s", "dn_s"):
                     M.loc[M.counter_id == c, k2] = v[k2]
+            done |= {a, b}
             print("  swapped")
 EN = {"東北中央自動車道": "Tohoku-Chuo Expressway"}  # national highways numbered outside 1-507 in the census
 out = []

@@ -50,7 +50,7 @@ O["same"] = C2.loc[O.a].to_numpy() == C2.loc[O.b].to_numpy()
 # all pairs (a pair with no road path within 60 km counts as 120 km, so far bands mostly measure "reachable or not"),
 # then only pairs with a road path, then pairs on different routes
 for label, sel in (("all", O.index == O.index), ("with a road path", np.isfinite(O.road)),
-                   ("different routes", ~O.same)):
+                   ("different routes", ~O.same & np.isfinite(O.road))):
     for lo, hi in ((0, 10), (10, 20), (20, 40), (40, 60)):
         q = O[sel & (O.line > lo) & (O.line <= hi)].copy()
         q["road_c"] = np.minimum(q.road, 120.0)

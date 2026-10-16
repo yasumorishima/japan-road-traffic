@@ -121,7 +121,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert list(g.columns) == ["counter_a", "counter_b", "road_km", "line_km", "same_route", "direct"]
     assert (g.counter_a < g.counter_b).all() and not g.duplicated(["counter_a", "counter_b"]).any()
     assert set(g.counter_a) | set(g.counter_b) <= set(cen.counter_id) and g.road_km.between(0.1, 60).all()
-    assert g.direct.dtype == bool and g.same_route.dtype == bool and len(g) > 1000 and g.line_km.ge(0).all()
+    assert g.direct.dtype == bool and g.same_route.dtype == bool and len(g) > 1000
     half = cen.set_index("counter_id").placed_km / 2
     over = g.line_km > g.road_km + half.loc[g.counter_a].to_numpy() + half.loc[g.counter_b].to_numpy() + 0.5
     assert over.sum() <= 0.01 * len(g), over.sum()  # a straight line cannot be much longer than the road

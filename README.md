@@ -141,24 +141,27 @@ differ by more than 2 points, the census shows the same side heavier for 93% (so
 (the role the sensor adjacency plays in PEMS-BAY or METR-LA). The census lists, for each end of each section, the section
 it connects to; `scripts/census/build_graph.py` joins the 99,417 census sections (expressways, national highways,
 prefectural and designated-city roads; sections impassable to vehicles left out) into one network on those links and takes
-the shortest path between counters. One row per pair within 60 km by road (1,747 pairs; 352 of the 365 counters have at
-least one), with the straight-line distance, `same_route`, and `direct` (no other counter in between; 990 pairs). A census
+the shortest path between counters. One row per pair within 60 km by road (1,777 pairs; 352 of the 365 counters have at
+least one), with the straight-line distance, `same_route`, and `direct` (no other counter in between; 1,016 pairs). A census
 section number names a survey unit that can span several sections (route 29 in Hyogo: one unit runs over ten sections in
 three cities), so a counter is placed at the middle of the unit's sections in its own municipality; `placed_km` in
 `census_2021_counters.csv` is the length of that stretch, and `placed_in_municipality` is False for the 4 counters whose
 unit has no section in their municipality.
 
 Checks: a straight line cannot be longer than the road, and it is longer by more than the placement allows for 4 of the
-1,747 pairs (by 0.75-1.35 km; census lengths there look short). Not used to build it: for two counters with a road path
+1,777 pairs (by 0.75-1.35 km; census lengths there look short). Not used to build it: for two counters with a road path
 between them, the hour-by-hour departure from their usual traffic (`vs_baseline`) moves together more when the road
 distance is shorter, beyond what the straight-line distance says (Spearman of the correlation of the two series with
-road distance against straight-line distance: -0.20 against -0.10 at 10-20 km, -0.30 against -0.13 at 20-40 km, and also
-for counters on different routes; no difference below 10 km, -0.30 against -0.29; `scripts/census/graph_validate.py`).
+road distance against straight-line distance: -0.18 against -0.10 at 10-20 km, -0.27 against -0.13 at 20-40 km, -0.13
+against +0.04 at 40-60 km; for counters on different routes -0.26 against -0.13 at 20-40 km; no difference below 10 km,
+-0.31 against -0.29; `scripts/census/graph_validate.py`).
 
 Building the graph also found one wrong tie in the census table: counters 3110650 (山北町, Kanagawa) and 5114680 (小山町,
 Shizuoka), 0.4 km apart on either side of the prefecture border on route 246, had each other's census section (similar
 traffic on both). The rule now swaps two ties when neither town name is in its census address and both are after the
-swap, with volume and fingerprints still passing (`scripts/census/build_census.py`, third amendment); this was the only case.
+swap, with volume, fingerprints and the 3 km limit still passing (`scripts/census/build_census.py`, third amendment); this
+was the only such pair. Three counters in Itabashi-ku hold one another's sections in a three-way rotation; they fail the
+rule as they are and are not tied (the amendment swaps pairs only).
 
 The Kaggle notebook [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffic-a-first-look) sets these speeds against the 2026 counts: ranked by vehicles per lane in the busiest rush hour of an average weekday, the quietest fifth of the tied counters hardly slows at rush hour and the busiest fifth loses about 15% of its daytime speed (rank correlation 0.58 over 363 counters; it holds within two-lane and within four-lane roads). This compares roads; it does not say a road was congested on any day of the archive.
 

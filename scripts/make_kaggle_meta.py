@@ -226,7 +226,8 @@ CENSUS_COLS = {
     "placed_to_section": ("Last census section of that stretch (the same as placed_from_section for a one-section "
                           "stretch). The numbers between the two are not all on the stretch"),
     "placed_km": ("Length of that stretch, km (census section lengths). road_graph_2021.csv measures from its middle, "
-                  "so the counter is within placed_km / 2 of the point used when placed_in_municipality is True"),
+                  "assuming the counter is on that stretch (it is the part of the unit in its municipality; the "
+                  "census does not say where on the unit a counter is)"),
     "placed_in_municipality": ("False for the 4 counters whose survey unit has no section in the counter's own "
                                "municipality (counters near a municipal border): they are placed on the whole unit, "
                                "which can lie partly in a neighbouring municipality"),
@@ -248,7 +249,7 @@ GRAPH_COLS = {
                 "built. It can exceed road_km by up to half of both placed_km; for 4 pairs it does by 0.75-1.35 km "
                 "more than that"),
     "same_route": "True when both counters are on the same census route (route_ja)",
-    "direct": ("True when no third counter of the table lies on the shortest path (within 0.2 km), i.e. the two are "
+    "direct": ("True when no third counter of the table lies on the shortest path (within 0.1 km), i.e. the two are "
                "neighbours along the road"),
 }
 

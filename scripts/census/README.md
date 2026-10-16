@@ -28,6 +28,6 @@ They need pandas, numpy and scipy. They are kept as the record of how the table 
    `census/road_graph_2021.csv` (pairs within 60 km by road) and `census/census_r3_placed.csv` (`census_r3_match.csv` plus
    `placed_from_section`, `placed_to_section`, `placed_km`, `placed_in_municipality`). Copy them to `data/road_graph_2021.csv` and
    `data/census_2021_counters.csv`. Its docstring has the joining rules, a variant that was tried and dropped, and the checks
-   (it stops when more than 1% of pairs have a straight line longer than the road allows; 4 of 1,747 did on 2026-10-17).
+   (it stops when more than 1% of pairs have a straight line longer than the road allows; 4 of 1,777 did on 2026-10-17).
 8. `graph_validate.py census/road_graph_2021.csv <dir of hourly_*.parquet>` is a check that was not used to build the graph:
    within straight-line distance bands, pairs closer by road have more correlated hourly `vs_baseline`.

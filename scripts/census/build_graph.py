@@ -15,8 +15,8 @@ kasyorep.pdf (4)):
      that names this one back.
 Checked and not used: also joining consecutive sections whose connection codes agree but name different sections of
 one other route (an interchange spread over two sections) made 179 counter pairs geometrically impossible instead of 3.
-National highways alone gave a graph with 1,040 pieces (a counter pair joined only through a prefectural road had no
-path).
+A first draft on national highways alone left many counter pairs without a path (two national routes are often joined
+only through a prefectural road), so all road types are used.
 
 Where a counter sits: the census values of a section are those of its survey unit. Every section names the observation
 section of its unit (column 32), and census_section in census_2021_counters.csv is that observation section, but the
@@ -31,7 +31,8 @@ junction along it (the distance from the middle to that junction along the stret
 
 Checks (printed; the run stops if they fail): a straight line cannot be longer than the road, so line_km must be at most
 road_km + half of both placed_km + 0.5 km; more than 1% failing stops the run.
-direct: no third counter lies on the path (d(a,c) + d(c,b) <= d(a,b) + 0.2 km for none), the edges a graph model would
+direct: no third counter lies on the path (d(a,c) + d(c,b) <= d(a,b) + 0.125 km for none: distances move in 0.05 km steps, so
+this is "within 0.1 km" and no sum sits on the threshold), the edges a graph model would
 usually take. graph_validate.py is a check not used to build.
 usage (from the work directory): build_graph.py [max_road_km=60]"""
 import csv, glob, io, sys, collections
@@ -100,8 +101,13 @@ for s in secs:
 print("merges", dict(cnt))
 roots = sorted({find(p) for p in range(2 * n)}); rid = {r: i for i, r in enumerate(roots)}
 u = np.array([rid[find(2 * i)] for i in range(n)]); v = np.array([rid[find(2 * i + 1)] for i in range(n)])
-W = coo_matrix((np.r_[L[passable], L[passable]], (np.r_[u[passable], v[passable]], np.r_[v[passable], u[passable]])),
-               shape=(len(roots), len(roots))).tocsr()
+# Parallel sections between the same two points (a bypass and the old road, divided carriageways) are one edge with
+# the shorter length: a sparse matrix built from duplicate entries would add their lengths.
+E = pd.DataFrame({"a": np.minimum(u, v)[passable], "b": np.maximum(u, v)[passable], "L": L[passable]})
+E = E[E.a != E.b].groupby(["a", "b"], as_index=False).L.min()  # a section whose two ends are one point is no path
+print("edges", len(E), "from", int(passable.sum()), "passable sections")
+W = coo_matrix((np.r_[E.L, E.L], (np.r_[E.a, E.b], np.r_[E.b, E.a])), shape=(len(roots), len(roots))).tocsr()
+assert W.nnz <= 2 * len(E) and np.isclose(W.sum(), 2 * E.L.sum())  # no entry summed with another
 
 C = pd.read_csv("census/census_r3_match.csv", dtype={"census_section": str})
 P = pd.read_csv("repo/data/counters.csv", dtype={"municipality_code": str}).set_index("counter_id")
@@ -159,7 +165,7 @@ for i in range(k):
         h = np.sin((lat[j] - lat[i]) / 2) ** 2 + np.cos(lat[i]) * np.cos(lat[j]) * np.sin((lon[j] - lon[i]) / 2) ** 2
         line = 2 * 6371.0 * np.arcsin(np.sqrt(h))
         others = [m for m in range(k) if m not in (i, j)]
-        direct = not np.any(R[i, others] + R[others, j] <= R[i, j] + 0.2)
+        direct = not np.any(R[i, others] + R[others, j] <= R[i, j] + 0.125)
         out.append(dict(counter_a=C.counter_id[i], counter_b=C.counter_id[j], road_km=round(R[i, j], 1), line_km=round(line, 1),
                         same_route=C.route_ja[i] == C.route_ja[j], direct=direct, _slack=plen[i] / 2 + plen[j] / 2))
 O = pd.DataFrame(out)
