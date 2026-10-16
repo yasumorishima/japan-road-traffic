@@ -4,7 +4,7 @@ layers into the English tables without losing a count, and make_kaggle_meta.py d
 import csv, json, os, shutil, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import fetch
+import fetch, amedas, enrich
 
 FIX = json.load(open(os.path.join(HERE, "..", "tests", "fixtures_live_20261005.json"), encoding="utf-8"))
 ASSET = {"t_travospublic_measure_5m": "loop_5m", "t_travospublic_measure_5m_img": "cctv_5m",
@@ -34,6 +34,19 @@ with tempfile.TemporaryDirectory() as tmp:
         fetch.write_csv(os.path.join(src, f"{ASSET[layer]}_road3_20261005.csv.gz"), [fetch.row(layer, f) for f in recs], layer)
         sensor = ASSET[layer].split("_")[0]
         ids |= {(f["properties"]["常時観測点コード"], sensor) for f in recs}
+    # one AMeDAS station near the test counters (139.6, 35.4) with the day of the fixtures, and the station table
+    wdir = os.path.join(tmp, "wx"); os.makedirs(wdir)
+    wrows = [{"obs_time_jst": f"20261005{h + 1:02d}00" if h < 23 else "202610060000",
+              "hour_start_jst": f"20261005{h:02d}00", "station_id": 46106, "temp_c": 20 + h / 10,
+              "temp_c_aqc": 0 if h != 8 else 5,  # the fixtures' hour (08:00) has a flagged temperature
+              "precip_1h_mm": 1.5 + h, "precip_1h_mm_aqc": 0, "wind_ms": 3.0, "wind_ms_aqc": 0}
+             for h in range(24)]
+    amedas.write_csv(os.path.join(wdir, "amedas_20261005.csv.gz"), wrows, amedas.COLUMNS)
+    amedas.write_csv(os.path.join(wdir, "amedas_stations_202610.csv.gz"),
+                     [{"station_id": 46106, "type": "A", "elems": "11111111", "lat": 35.43833, "lon": 139.65167,
+                       "alt_m": 39, "name_ja": "横浜", "name_kana": "ヨコハマ", "name_en": "Yokohama"}],
+                     amedas.STATION_COLUMNS)
+    WX = ["--weather", wdir]
     counters = os.path.join(tmp, "counters.csv")
     HEADER = ["counter_id", "sensor", "road_type", "longitude", "latitude", "prefecture", "municipality_code",
               "municipality", "town", "in_5min_box", "last_seen"]
@@ -41,7 +54,7 @@ with tempfile.TemporaryDirectory() as tmp:
         w = csv.writer(g); w.writerow(HEADER)
         w.writerows([[i, s, 3, 139.6, 35.4, "神奈川県", "14101", "横浜市鶴見区", "", True, "2026-10-05"] for i, s in sorted(ids)])
     out = os.path.join(tmp, "out")
-    build = [sys.executable, os.path.join(HERE, "build_kaggle.py"), src, out, "--counters", counters]
+    build = [sys.executable, os.path.join(HERE, "build_kaggle.py"), src, out, "--counters", counters, *WX]
     r = subprocess.run(build, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     h = pd.read_parquet(os.path.join(out, "hourly_2026-10_01-10.parquet"))
@@ -63,7 +76,9 @@ with tempfile.TemporaryDirectory() as tmp:
                     assert pd.isna(row["up_total"])
     assert str(h.up_missing_processing.dtype) == "Int8" and str(m.cam_preset_position.dtype) == "boolean"
     assert len(h) == len(FIX["t_travospublic_measure_1h"]) + len(FIX["t_travospublic_measure_1h_img"])
-    assert sorted(os.listdir(out)) == ["census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
+    assert sorted(os.listdir(out)) == ["calendar.csv", "census_2021_counters.csv", "counters.csv",
+                                       "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet",
+                                       "weather_hourly_2026-10_01-10.parquet", "weather_stations.csv"]
     # ten-day chunks: names do not depend on which days are present yet
     import build_kaggle
     assert [build_kaggle.chunk(d) for d in ("20261001", "20261010", "20261011", "20261020", "20261021", "20261031",
@@ -75,7 +90,8 @@ with tempfile.TemporaryDirectory() as tmp:
     r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     md = json.load(open(os.path.join(out, "dataset-metadata.json"), encoding="utf-8"))
-    FILES = ["census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet"]
+    FILES = ["calendar.csv", "census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet",
+             "hourly_2026-10_01-10.parquet", "weather_hourly_2026-10_01-10.parquet", "weather_stations.csv"]
     assert sorted(x["path"] for x in md["resources"]) == FILES
     for x in md["resources"]:
         names = [f["name"] for f in x["schema"]["fields"]]
@@ -102,7 +118,7 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(counters, "w", newline="", encoding="utf-8") as g:
         w = csv.writer(g); w.writerow(HEADER)
         w.writerows([[i, s, 3, 139.6, 35.4, "神奈川県", "14101", "横浜市鶴見区", "", True, "2026-10-05"] for i, s in sorted(ids)[1:]])
-    r = subprocess.run(build[:3] + [out + "2", "--counters", counters], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [out + "2", "--counters", counters, *WX], capture_output=True, text=True)
     assert r.returncode != 0 and "not in" in (r.stderr + r.stdout), r.stderr
 
     # 5. derived columns, recomputed here from the source's columns
@@ -130,15 +146,23 @@ with tempfile.TemporaryDirectory() as tmp:
         fetch.write_csv(os.path.join(src5, f"{ASSET[layer]}_road3_20261005.csv.gz"), rows, layer)
     hol = os.path.join(tmp, "hol.csv")
     with open(hol, "w", encoding="utf-8") as g:
-        g.write("date,name\n2026-10-05,test\n2027-01-01,元日\n")
+        g.write("date,name\n2026-10-05,スポーツの日\n2027-01-01,元日\n")
     write_counters(full())
     out5 = os.path.join(tmp, "out5")
-    r = subprocess.run(build[:2] + [src5, out5, "--counters", counters, "--holidays", hol], capture_output=True, text=True)
+    r = subprocess.run(build[:2] + [src5, out5, "--counters", counters, *WX, "--holidays", hol], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     for name in ("hourly_2026-10_01-10.parquet", "five_minute_kanto_2026-10_01-10.parquet"):
         d = pd.read_parquet(os.path.join(out5, name))
         five = name.startswith("five")
-        assert list(d.columns) == build_kaggle.ORDER + (build_kaggle.STATUS if five else []) + build_kaggle.DERIVED, name
+        assert list(d.columns) == (build_kaggle.ORDER + (build_kaggle.STATUS if five else []) + build_kaggle.DERIVED
+                                   + ([] if five else enrich.CAL_ROW + enrich.BASE_ROW + enrich.WEATHER_ROW)), name
+        if not five:
+            # 2026-10-05 is a holiday in hol.csv after a weekend: a run of three days off
+            assert d.day_off.all() and (d.days_off_in_run == 3).all() and d.customary_break.isna().all(), name
+            # the station is about 6 km away: within every limit; rain of 08:00-09:00 is 9.5 mm
+            assert (d.time_jst.dt.hour == 8).all() and (d.precip_mm == 9.5).all() and (d.wind_ms == 3.0).all()
+            assert d.temp_c.isna().all() and d.snow_depth_cm.isna().all()  # flagged in the source; no snow station
+            assert d.baseline_vehicles.isna().all() and d.vs_baseline.isna().all()  # one day: no earlier days
         loop = d.sensor == "loop"
         for side in ("up", "down"):
             fl = d[[f"{side}_{x}" for x in ("power_failure", "loop_fault", "ultrasonic_fault", "missing")]]
@@ -163,7 +187,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert len(row) >= 1 and row.up_vehicles.isna().all() and row.down_vehicles.notna().all() and row.flagged.isna().all()
     # the real holiday list: 2026-10-05 is not a holiday; build_kaggle reads data/holidays_jp.csv by default
     real = os.path.join(tmp, "out6")
-    r = subprocess.run(build[:3] + [real, "--counters", counters], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [real, "--counters", counters, *WX], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert not pd.read_parquet(os.path.join(real, "hourly_2026-10_01-10.parquet")).is_holiday.any()
     hl = pd.read_csv(os.path.join(HERE, "..", "data", "holidays_jp.csv"), dtype=str)
@@ -171,18 +195,18 @@ with tempfile.TemporaryDirectory() as tmp:
     # a list whose last year is the data's year passes; one that ends before the data stops the build
     with open(hol, "w", encoding="utf-8") as g:
         g.write("date,name\n2026-01-01,元日\n")
-    r = subprocess.run(build[:3] + [os.path.join(tmp, "out10"), "--counters", counters, "--holidays", hol], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out10"), "--counters", counters, *WX, "--holidays", hol], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     with open(hol, "w", encoding="utf-8") as g:
         g.write("date,name\n2025-01-01,元日\n")
-    r = subprocess.run(build[:3] + [os.path.join(tmp, "out7"), "--counters", counters, "--holidays", hol], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out7"), "--counters", counters, *WX, "--holidays", hol], capture_output=True, text=True)
     assert r.returncode != 0 and "holiday list ends" in (r.stderr + r.stdout), r.stderr
     # a prefecture name that disagrees with its code stops the build; no municipality at all gives empty names
     write_counters(full(code="13101"))
-    r = subprocess.run(build[:3] + [os.path.join(tmp, "out8"), "--counters", counters], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out8"), "--counters", counters, *WX], capture_output=True, text=True)
     assert r.returncode != 0 and "does not match" in (r.stderr + r.stdout), r.stderr
     write_counters(full(pref="", code=""))
-    r = subprocess.run(build[:3] + [os.path.join(tmp, "out9"), "--counters", counters], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out9"), "--counters", counters, *WX], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     d = pd.read_parquet(os.path.join(tmp, "out9", "hourly_2026-10_01-10.parquet"))
     assert d.prefecture.isna().all() and d.prefecture_en.isna().all()
@@ -190,22 +214,24 @@ with tempfile.TemporaryDirectory() as tmp:
     assert (c9.prefecture_en == "").all() and (c9.municipality_en == "").all()
     # English names in the published counters.csv, next to the Japanese ones
     write_counters(full())
-    r = subprocess.run(build[:3] + [os.path.join(tmp, "out11"), "--counters", counters], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out11"), "--counters", counters, *WX], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     c11 = pd.read_csv(os.path.join(tmp, "out11", "counters.csv"), dtype=str, keep_default_na=False)
     assert list(c11.columns) == ["counter_id", "sensor", "road_type", "longitude", "latitude", "prefecture", "prefecture_en",
-                                 "municipality_code", "municipality", "municipality_en", "town", "in_5min_box", "last_seen"]
+                                 "municipality_code", "municipality", "municipality_en", "town", "in_5min_box", "last_seen"
+                                 ] + enrich.STATION_COLS
+    assert (c11.precip_station_id == "46106").all() and (c11.snow_station_id == "").all()  # snow: not in the station's rows
     assert (c11.prefecture_en == "Kanagawa").all() and (c11.municipality_en == "Yokohama-shi Tsurumi-ku").all()
     assert (c11.municipality_code == "14101").all() and len(c11) == len(ids)
-    assert c11.drop(columns=["prefecture_en", "municipality_en"]).equals(pd.read_csv(counters, dtype=str, keep_default_na=False))
+    assert c11.drop(columns=["prefecture_en", "municipality_en"] + enrich.STATION_COLS).equals(pd.read_csv(counters, dtype=str, keep_default_na=False))
     write_counters([[i, s, 3, 139.6, 35.4, "神奈川", "14101", "x", "", True, "2026-10-05"] for i, s in sorted(ids)])
-    r = subprocess.run(build[:3] + [os.path.join(tmp, "out13"), "--counters", counters], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out13"), "--counters", counters, *WX], capture_output=True, text=True)
     assert r.returncode != 0 and "does not match" in (r.stderr + r.stdout), r.stderr  # not one of the 47: places() stops first
     write_counters(full())
     names = os.path.join(tmp, "names.csv")
     with open(names, "w", encoding="utf-8") as g:
         g.write("municipality_code,prefecture,municipality,municipality_kana,municipality_en\n01100,北海道,札幌市,サッポロシ,Sapporo-shi\n")
-    r = subprocess.run(build[:3] + [os.path.join(tmp, "out12"), "--counters", counters, "--names", names], capture_output=True, text=True)
+    r = subprocess.run(build[:3] + [os.path.join(tmp, "out12"), "--counters", counters, *WX, "--names", names], capture_output=True, text=True)
     assert r.returncode != 0 and "no English name" in (r.stderr + r.stdout), r.stderr
     # the committed table: one row per code, every name in the expected shape, known hard cases right
     mt = pd.read_csv(os.path.join(HERE, "..", "data", "municipalities_en.csv"), dtype=str)

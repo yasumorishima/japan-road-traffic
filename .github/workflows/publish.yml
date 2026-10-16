@@ -52,6 +52,7 @@ jobs:
           python scripts/test_fetch.py
           python scripts/test_collect.py
           python scripts/test_fixtures.py
+          python scripts/test_enrich.py
 
       - name: Compare the archive with the last published version
         env:
@@ -80,8 +81,14 @@ jobs:
             gh release download "$tag" --dir "dl/$tag" --pattern '*.csv.gz'
           done
           test "$(find dl -name '*.csv.gz' | wc -l)" -eq "$(wc -l < assets.txt)"
+          # the AMeDAS archive (weather columns and files); a failed download stops the build, so a version is never
+          # published with the weather silently missing
+          mkdir -p _weather
+          for tag in $(gh release list --limit 200 --json tagName -q ".[].tagName" | grep "^amedas-"); do
+            gh release download "$tag" --dir _weather --pattern "*.csv.gz" --skip-existing
+          done
           python scripts/build_counters.py --from-files dl --no-api
-          python scripts/build_kaggle.py dl _build --counters data/counters.csv
+          python scripts/build_kaggle.py dl _build --counters data/counters.csv --weather _weather
           python scripts/make_kaggle_meta.py _build
           ls -la _build
 

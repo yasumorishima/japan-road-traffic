@@ -15,9 +15,16 @@ entered on the dataset page carry over to later versions.
 
 Derived columns are appended after the source's columns: vehicles per direction and in total (blank when a
 permanent counter flags a fault, because flagged hours are unreliable even when they carry counts), one flag column,
-the weekday, Japanese national holidays (data/holidays_jp.csv, from the Cabinet Office list) and the prefecture."""
+the weekday, Japanese national holidays (data/holidays_jp.csv, from the Cabinet Office list) and the prefecture;
+then, in the hourly files, the calendar, a baseline from earlier days and the nearest AMeDAS weather (enrich.py).
+The five-minute files keep their columns: with five more, a ten-day file (573,000 rows x 47 columns, 26.9 million
+cells) would pass the size at which Kaggle's preview failed before (1.1 million rows x 24 columns, 26.4 million).
+  calendar.csv                    one row per day of the data: days off, runs of days off, holiday names
+  weather_hourly_YYYY-MM_DD-DD.parquet, weather_stations.csv   the AMeDAS archive (amedas-* releases)"""
 import argparse, calendar, glob, os, re, shutil, sys
 import pandas as pd
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import enrich
 
 KEY = {"時間コード": "time_code", "常時観測点コード": "counter_id", "道路種別": "road_type",
        "地方整備局等番号": "regional_bureau", "開発建設部／都道府県コード": "sub_region"}
@@ -186,18 +193,28 @@ def main():
     ap.add_argument("src"); ap.add_argument("out"); ap.add_argument("--counters", required=True)
     ap.add_argument("--holidays", default=os.path.join(ROOT, "data", "holidays_jp.csv"))
     ap.add_argument("--names", default=os.path.join(ROOT, "data", "municipalities_en.csv"))
+    ap.add_argument("--weather", required=True, help="directory with the files of the amedas-* releases")
     a = ap.parse_args()
     hol, last_year = holidays(a.holidays)
+    cal = enrich.calendar(a.holidays)
+    w, stations, has = enrich.load_weather(a.weather)
+    place = places(a.counters)  # checks the prefecture against its code before counters_en reads the names
+    cen = counters_en(a.counters, a.names)
+    near = enrich.nearest_stations(cen, stations, has)
+    near.index = pd.MultiIndex.from_arrays([cen.counter_id.astype("int32"), cen.sensor], names=["counter_id", "sensor"])
+    prev = None
+    first_day = last_day = None
     groups = {}
     for p in glob.glob(os.path.join(a.src, "**", "*.csv.gz"), recursive=True):
         m = NAME.match(os.path.basename(p))
         if m:
             sensor, res, road, day = m.groups()
             groups.setdefault((res, chunk(day)), []).append((p, sensor))
+            first_day = min(first_day or day, day); last_day = max(last_day or day, day)
     if not groups:
         sys.exit("no release files found")
+    enrich.check_span(cal, pd.Timestamp(last_day).date())
     os.makedirs(a.out, exist_ok=True)
-    place = places(a.counters)
     known = set(place)
     unknown = set()
     for (res, month), files in sorted(groups.items()):
@@ -216,13 +233,27 @@ def main():
             unknown |= new
             continue
         df = derive(df, place, hol, last_year)
+        if res == "1h":
+            df = enrich.add_calendar(df, cal)
+            prev = enrich.baseline(df, cal, prev)
+            df = enrich.add_weather(df, w, near)
         name = ("hourly" if res == "1h" else "five_minute_kanto") + f"_{month}.parquet"  # month = 'YYYY-MM_DD-DD'
         df.to_parquet(os.path.join(a.out, name), index=False, compression="zstd", row_group_size=50_000)
         print(f"{name}: {len(df):,} rows, {df.time_jst.dt.date.nunique()} days", flush=True)
     if unknown:
         sys.exit(f"{len(unknown)} counters are not in {a.counters} (rebuild it with --from-files): {sorted(unknown)[:10]}")
-    counters_en(a.counters, a.names).to_csv(os.path.join(a.out, "counters.csv"), index=False, lineterminator="\n")
+    pd.concat([cen, near.reset_index(drop=True).set_axis(cen.index)], axis=1).to_csv(
+        os.path.join(a.out, "counters.csv"), index=False, lineterminator="\n")
     shutil.copy(os.path.join(ROOT, "data", "census_2021_counters.csv"), a.out)
+    lo, hi = pd.Timestamp(first_day).date(), pd.Timestamp(last_day).date()
+    cal[(cal.date >= lo) & (cal.date <= hi)].to_csv(os.path.join(a.out, "calendar.csv"), index=False,
+                                                    lineterminator="\n")
+    w = w[w.time_jst.dt.date <= hi]
+    for name, g in w.groupby(w.time_jst.dt.strftime("%Y%m%d").map(chunk)):
+        g.to_parquet(os.path.join(a.out, f"weather_hourly_{name}.parquet"), index=False, compression="zstd",
+                     row_group_size=50_000)
+        print(f"weather_hourly_{name}.parquet: {len(g):,} rows, {g.time_jst.dt.date.nunique()} days", flush=True)
+    stations.to_csv(os.path.join(a.out, "weather_stations.csv"), index=False, lineterminator="\n")
 
 if __name__ == "__main__":
     main()

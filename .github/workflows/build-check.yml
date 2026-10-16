@@ -1,0 +1,91 @@
+name: Build check (branches)
+
+# On a push to a branch other than main: the tests, planted defects that the tests must catch, and a full build of
+# the Kaggle files from every archived release with an independent recomputation of the added columns. Nothing is
+# uploaded or published.
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - "scripts/**"
+      - "data/**"
+      - ".github/workflows/build-check.yml"
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: Why this run
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests
+        run: |
+          pip install --quiet pandas pyarrow
+          python scripts/test_fetch.py
+          python scripts/test_collect.py
+          python scripts/test_fixtures.py
+          python scripts/test_enrich.py
+      - name: Planted defects (each must make test_enrich.py fail)
+        run: |
+          set -u
+          try() {  # name, python expression that edits the text s
+            cp scripts/enrich.py /tmp/enrich.keep
+            python - "$2" <<'EOF'
+          import sys
+          s = open("scripts/enrich.py", encoding="utf-8").read()
+          t = eval(sys.argv[1])
+          assert t != s, "the mutation did not change the file"
+          open("scripts/enrich.py", "w", encoding="utf-8").write(t)
+          EOF
+            if python scripts/test_enrich.py > /tmp/m.log 2>&1; then echo "SURVIVED: $1"; cp /tmp/enrich.keep scripts/enrich.py; exit 1; fi
+            echo "caught: $1 ($(tail -1 /tmp/m.log | cut -c1-120))"
+            cp /tmp/enrich.keep scripts/enrich.py
+          }
+          try "baseline reads the row's own day" 's.replace("allow_exact_matches=False", "allow_exact_matches=True")'
+          try "baseline looks forward" 's.replace("direction=\"backward\"", "direction=\"forward\"")'
+          try "customary break days used" 's.replace("& df.customary_break.isna().to_numpy()", "")'
+          try "holidays not counted as Sunday" 's.replace("np.where(hol, 6, df.time_jst.dt.dayofweek)", "df.time_jst.dt.dayofweek")'
+          try "weather hour shifted" 's.replace("df.time_jst.dt.floor(\"h\").to_numpy()", "(df.time_jst.dt.floor(\"h\") + pd.Timedelta(hours=1)).to_numpy()")'
+          try "empty join allowed" 's.replace("< MIN_FILLED", "< 0.0")'
+          try "citizens holiday rule" 's.replace("named[i - 1] and named[i + 1]", "False")'
+          try "run of days off" 's.replace("run[i:j] = j - i", "run[i:j] = 1")'
+          try "obon range" 's.replace("(8, 13) <= x <= (8, 16)", "(8, 13) <= x <= (8, 15)")'
+          try "calendar margin" 's.replace("CAL_MARGIN = 14", "CAL_MARGIN = 0")'
+          try "quality flag ignored" 's.replace("w[e] = w[e].where(w[e + \"_aqc\"] == 0)", "pass")'
+          try "rain limit" 's.replace("(\"precip_mm\", \"precip_1h_mm\", 10)", "(\"precip_mm\", \"precip_1h_mm\", 1000)")'
+          try "element rule" 's.replace("s.notna().mean() >= 0.5", "True")'
+          try "station coverage gate" 's.replace("near.mean() < MIN_STATION[col]", "False")'
+          try "station without coordinates" 's.replace("D = np.where(np.isfinite(D), D, np.inf)", "D = D")'
+          try "temperature limit" 's.replace("(\"temp_c\", \"temp_c\", 20)", "(\"temp_c\", \"temp_c\", 1000)")'
+          try "rain coverage level" 's.replace("\"precip_mm\": 0.75", "\"precip_mm\": 0.7")'
+          try "temperature coverage level" 's.replace("\"temp_c\": 0.9,", "\"temp_c\": 0.85,")'
+          try "wind coverage level" 's.replace("\"wind_ms\": 0.9}", "\"wind_ms\": 0.85}")'
+          try "coverage gate minimum" 's.replace("len(counters) >= 100 and", "len(counters) >= 1000 and")'
+      - name: Full build from the archive and an independent recomputation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          for tag in $(gh release list --limit 200 --json tagName -q ".[].tagName" | grep "^raw-"); do
+            gh release download "$tag" --dir "dl/$tag" --pattern '*.csv.gz'
+          done
+          mkdir -p _weather
+          for tag in $(gh release list --limit 200 --json tagName -q ".[].tagName" | grep "^amedas-"); do
+            gh release download "$tag" --dir _weather --pattern "*.csv.gz"
+          done
+          python scripts/build_counters.py --from-files dl --no-api
+          python scripts/build_kaggle.py dl _build --counters data/counters.csv --weather _weather
+          python scripts/make_kaggle_meta.py _build --settings /tmp/settings.json
+          ls -la _build | head -60
+          python scripts/verify_enrich.py _build _weather
