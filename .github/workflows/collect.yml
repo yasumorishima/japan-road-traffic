@@ -50,6 +50,7 @@ jobs:
           python scripts/test_fetch.py
           python scripts/test_collect.py
           python scripts/test_fixtures.py
+          python scripts/test_enrich.py
 
       - name: Fetch missing days and upload them to releases
         env:

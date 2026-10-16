@@ -16,7 +16,9 @@ SUBTITLE = "Vehicle counts on Japan's national highways, hourly nationwide and 5
 SOURCES = ("MLIT Traffic Volume API (交通量API, reference values), data provided by the Japan Road Traffic "
            "Information Center (JARTIC, https://www.jartic-open-traffic.org/); place names from the GSI reverse "
            "geocoder (国土地理院); census_2021_counters.csv from the 2021 Road Traffic Census (令和3年度全国道路・街路交通情勢調査, "
-           "MLIT, 公共データ利用規約 第1.0版), edited. Collected three times a day and built by https://github.com/yasumorishima/japan-road-traffic, "
+           "MLIT, 公共データ利用規約 第1.0版), edited; weather from the AMeDAS observations of the Japan Meteorological "
+           "Agency website (気象庁ホームページのアメダス観測値を加工して作成, 公共データ利用規約 第1.0版; not made or "
+           "endorsed by JMA). Collected three times a day and built by https://github.com/yasumorishima/japan-road-traffic, "
            "which uploads a day only when every check passes.")
 
 DIR = {"up": "the 'up' direction (上り)", "down": "the 'down' direction (下り)"}
@@ -83,6 +85,28 @@ COLS |= {
     "prefecture_en": "Derived: the same prefecture in English (Hokkaido, Tokyo, Osaka ...), from the JIS prefecture "
                      "code in counters.csv municipality_code",
 }
+LOOKBACK = ("on the most recent 4 earlier days of the same day class (the weekday; national holidays count as "
+            "Sunday) within the 35 days before the row's day, at least 3 of them; days in a customary_break and rows "
+            "with an empty vehicles are not used. Only earlier days are read, so it can be used as a forecasting "
+            "feature")
+WX = ("from the counter's nearest AMeDAS station that reports {what} (within {km} km; the station is "
+      "{name}_station_id in counters.csv), JMA observations with the normal quality flag only. Weather is archived "
+      "from 2026-09-29; earlier rows are empty")
+COLS |= {
+    "day_off": "Derived: True on Saturdays, Sundays and national holidays (is_holiday)",
+    "days_off_in_run": "Derived: length of the run of consecutive days off that holds this day (2 = an ordinary "
+                       "weekend, 3 = a three-day weekend, 5 = Silver Week 2026); 0 on a working day",
+    "customary_break": "Derived: obon (August 13-16) or new_year (December 29 - January 3, the government offices' "
+                       "year-end holidays); empty otherwise. These are not days off by law, but many firms close",
+    "baseline_vehicles": "Derived: median of vehicles of the same counter, sensor and time of day " + LOOKBACK,
+    "vs_baseline": "Derived: vehicles / baseline_vehicles (1.2 = 20% more than usual); empty when either is empty "
+                   "or the baseline is 0. A count, not a congestion measure",
+    "precip_mm": "Hourly files only: rain in the hour starting at time_jst, mm, " + WX.format(what="precipitation", km=10, name="precip"),
+    "temp_c": "Hourly files only: air temperature at the end of the hour, deg C, " + WX.format(what="temperature", km=20, name="temp"),
+    "wind_ms": "Hourly files only: wind speed at the end of the hour, m/s, " + WX.format(what="wind", km=20, name="wind"),
+    "snow_depth_cm": "Hourly files only: snow depth at the end of the hour, cm, " + WX.format(what="snow depth", km=20, name="snow")
+                     + ". JMA flags snow depth outside the snow season, so it is empty then",
+}
 COUNTER_COLS = {
     "counter_id": "Counter ID (常時観測点コード)",
     "sensor": "loop = permanent counter, cctv = AI count on CCTV images; (counter_id, sensor) is the key",
@@ -103,6 +127,66 @@ COUNTER_COLS = {
     "in_5min_box": "True when the counter is inside the Kanto box that has five-minute data "
                    "(longitude 138.4-140.95, latitude 34.85-37.2)",
     "last_seen": "Latest day (JST) this counter reported in the API or in the archive",
+}
+for n, (what, k) in {"precip": ("precipitation", 10), "temp": ("temperature", 20), "wind": ("wind", 20),
+                     "snow": ("snow depth", 20)}.items():
+    COUNTER_COLS[f"{n}_station_id"] = (f"AMeDAS station (weather_stations.csv) whose {what} the hourly files use for "
+                                       f"this counter: the nearest station reporting it, empty if none is within {k} km")
+    COUNTER_COLS[f"{n}_station_km"] = f"Distance, km, from the counter to {n}_station_id"
+CALENDAR_DESC = ("One row per day (JST) of the traffic data: weekday, national holidays with their names in Japanese "
+                 "and English, days off, runs of days off and customary breaks. Join on the date of time_jst.")
+CALENDAR_COLS = {
+    "date": "Date, JST (YYYY-MM-DD)",
+    "weekday": "0 = Monday ... 6 = Sunday",
+    "is_holiday": "True on national holidays, substitute holidays and citizens' holidays (Cabinet Office list)",
+    "holiday_name": "Holiday name in Japanese (内閣府の名称; the list's 休日 is written 振替休日 or 国民の休日 by the rule of "
+                    "the Holiday Act); empty on other days",
+    "holiday_name_en": "Holiday name in English (Cabinet Office English names; Substitute Holiday, Citizens' Holiday)",
+    "day_off": "True on Saturdays, Sundays and holidays",
+    "days_off_in_run": "Length of the run of consecutive days off that holds this day; 0 on a working day",
+    "next_day_off": "True when the next day is a day off (the evening before a weekend or holiday)",
+    "customary_break": "obon (August 13-16), new_year (December 29 - January 3) or empty; not days off by law",
+}
+WSTATION_DESC = ("AMeDAS stations of the Japan Meteorological Agency as listed by the JMA site in the latest month of "
+                 "the archive: ID, type, location, altitude and names in Japanese, kana and English.")
+WSTATION_COLS = {
+    "station_id": "AMeDAS station number; joins weather_hourly_*.parquet and the *_station_id columns of counters.csv",
+    "type": "Station type as coded by the JMA site (A = staffed or larger station, B to F = automatic stations by kind)",
+    "elems": "Observed elements as coded by the JMA site (8 digits, one per element group; 0 = not observed). The "
+             "hourly files decide whether a station reports an element from the data instead",
+    "lat": "Latitude, degrees (WGS84 as converted from the site's degrees and minutes)",
+    "lon": "Longitude, degrees",
+    "alt_m": "Altitude, m",
+    "name_ja": "Station name in Japanese",
+    "name_kana": "Station name in katakana",
+    "name_en": "Station name in English (as given by the JMA site)",
+}
+WEATHER_DESC = ("Hourly AMeDAS observations for {m} (JST) at every JMA station: one row per hour and station. "
+                "Values with a quality flag other than normal are empty. Join stations via weather_stations.csv.")
+AQC = " (JMA observation; empty unless its quality flag is normal)"
+WEATHER_COLS = {
+    "time_jst": "Start of the hour, JST: the JMA observation time minus one hour, so it lines up with time_jst of "
+                "the traffic files (rain and sunshine of that hour; readings such as temperature are at its end)",
+    "station_id": "AMeDAS station number (weather_stations.csv)",
+    "temp_c": "Air temperature, deg C" + AQC,
+    "humidity_pct": "Relative humidity, %" + AQC,
+    "precip_10m_mm": "Precipitation in the 10 minutes before the observation time, mm" + AQC,
+    "precip_1h_mm": "Precipitation in the hour, mm" + AQC,
+    "precip_3h_mm": "Precipitation in the 3 hours before the observation time, mm" + AQC,
+    "precip_24h_mm": "Precipitation in the 24 hours before the observation time, mm" + AQC,
+    "wind_ms": "Wind speed (10-minute mean), m/s" + AQC,
+    "wind_dir16": "Wind direction as a 16-point code of the JMA site (0 when calm)" + AQC,
+    "sun_10m_min": "Sunshine in the 10 minutes before the observation time, minutes" + AQC,
+    "sun_1h_h": "Sunshine in the hour, hours" + AQC,
+    "snow_depth_cm": "Snow depth, cm" + AQC,
+    "snow_1h_cm": "Snowfall in the hour, cm" + AQC,
+    "snow_6h_cm": "Snowfall in the 6 hours before the observation time, cm" + AQC,
+    "snow_12h_cm": "Snowfall in the 12 hours before the observation time, cm" + AQC,
+    "snow_24h_cm": "Snowfall in the 24 hours before the observation time, cm" + AQC,
+    "pressure_hpa": "Station pressure, hPa" + AQC,
+    "sea_level_pressure_hpa": "Sea-level pressure, hPa" + AQC,
+    "visibility_m": "Visibility, m" + AQC,
+    "weather_code": "Present weather as coded by the JMA site (staffed stations only)" + AQC,
 }
 
 CENSUS_DESC = ("365 permanent counters on national highways tied to their section of the 2021 Road Traffic Census "
@@ -167,6 +251,17 @@ def main():
             cols = pd.read_csv(p, nrows=0).columns.tolist()
             desc = CENSUS_DESC
             table = CENSUS_COLS
+        elif re.match(r"^weather_hourly_\d{4}-\d{2}_\d{2}-\d{2}\.parquet$", n):
+            cols = pq.read_schema(p).names
+            mm = re.match(r"^weather_hourly_(\d{4}-\d{2})_(\d{2})-(\d{2})", n)
+            desc = WEATHER_DESC.format(m=f"{mm.group(1)}-{mm.group(2)} to {mm.group(1)}-{mm.group(3)}")
+            table = WEATHER_COLS
+        elif n == "weather_stations.csv":
+            cols = pd.read_csv(p, nrows=0).columns.tolist()
+            desc, table = WSTATION_DESC, WSTATION_COLS
+        elif n == "calendar.csv":
+            cols = pd.read_csv(p, nrows=0).columns.tolist()
+            desc, table = CALENDAR_DESC, CALENDAR_COLS
         elif n == "dataset-metadata.json":
             continue
         else:
@@ -179,8 +274,10 @@ def main():
         resources.append({"path": n, "description": desc,
                           "schema": {"fields": [{"name": c, "description": table[c]} for c in cols]}})
         files[n] = {"description": desc, "columns": {c: table[c] for c in cols}}
-    if not any(n.startswith("hourly_") for n in files) or not {"counters.csv", "census_2021_counters.csv"} <= set(files):
-        sys.exit("the build has no hourly file, no counters.csv or no census_2021_counters.csv")
+    need = {"counters.csv", "census_2021_counters.csv", "calendar.csv", "weather_stations.csv"}
+    if not any(n.startswith("hourly_") for n in files) or not any(n.startswith("weather_hourly_") for n in files) \
+            or not need <= set(files):
+        sys.exit(f"the build lacks an hourly or weather file or one of {sorted(need)}")
     meta = {"title": TITLE, "subtitle": SUBTITLE, "id": ID, "licenses": [{"name": "CC-BY-4.0"}],
             "keywords": ["transportation", "time series analysis", "japan", "automobiles and vehicles", "tabular"],
             "expectedUpdateFrequency": "daily", "description": DESCRIPTION, "resources": resources}
