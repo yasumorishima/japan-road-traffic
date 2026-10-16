@@ -72,6 +72,9 @@ jobs:
           try "temperature coverage level" 's.replace("\"temp_c\": 0.9,", "\"temp_c\": 0.85,")'
           try "wind coverage level" 's.replace("\"wind_ms\": 0.9}", "\"wind_ms\": 0.85}")'
           try "coverage gate minimum" 's.replace("len(counters) >= 100 and", "len(counters) >= 1000 and")'
+          try "coverage gate minimum lowered" 's.replace("len(counters) >= 100 and", "len(counters) >= 50 and")'
+          try "coverage gate at its level" 's.replace("near.mean() < MIN_STATION[col]", "near.mean() <= MIN_STATION[col]")'
+          try "snow limit" 's.replace("(\"snow_depth_cm\", \"snow_depth_cm\", 20)", "(\"snow_depth_cm\", \"snow_depth_cm\", 1000)")'
       - name: Full build from the archive and an independent recomputation
         env:
           GH_TOKEN: ${{ github.token }}

@@ -107,7 +107,7 @@ def hav(a, b, c, d):
 
 
 ci2 = cn.merge(pick, on=["counter_id", "sensor"])
-checked = 0
+checked = within = 0
 for r in ci2.itertuples():
     for name, e, lim in EL:
         best = math.inf
@@ -123,9 +123,11 @@ for r in ci2.itertuples():
         if best <= lim:
             assert pd.notna(sid) and abs(dist[int(sid)] - best) < 1e-6 and abs(float(dk) - best) < 0.006, \
                 (r.counter_id, r.sensor, name, sid, dk, best)
+            within += 1
         else:
             assert pd.isna(sid) and pd.isna(dk), (r.counter_id, r.sensor, name, sid, dk, best)
         checked += 1
-print("station choice agrees for", checked, "(counter, element) pairs")
+print("station choice agrees for", checked, "(counter, element) pairs,", within, "of them with a station")
+assert checked == 4 * len(ci2) and within >= checked / 2  # the check is not vacuous
 print("stations within limit:", {k: int(cn[k].notna().sum()) for k in cn.columns if k.endswith("_station_id")}, "of", len(cn))
 print("km max", {k: float(cn[k].max()) for k in cn.columns if k.endswith("_station_km")})
