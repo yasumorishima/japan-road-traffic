@@ -46,7 +46,8 @@ rng = np.random.default_rng(0)
 base = frame(70, lambda df: rng.integers(50, 500, len(df)))
 full = base.copy()
 enrich.baseline(full, cal, None)
-assert full.baseline_vehicles.notna().mean() > 0.8
+# the first three weeks have fewer than 3 earlier days of their class: about 70% of 70 days get a baseline
+assert 0.6 < full.baseline_vehicles.notna().mean() < 0.75, full.baseline_vehicles.notna().mean()
 # naive recomputation of every row of one counter at 08:00
 for r in full[(full.counter_id == 1) & (full.time_jst.dt.hour == 8)].itertuples():
     d = r.time_jst.normalize()
