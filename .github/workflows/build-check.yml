@@ -80,6 +80,7 @@ jobs:
           try "wind limit 19.5 km" 's.replace("(\"wind_ms\", \"wind_ms\", 20)", "(\"wind_ms\", \"wind_ms\", 19.5)")'
           try "snow limit 20.5 km" 's.replace("(\"snow_depth_cm\", \"snow_depth_cm\", 20)", "(\"snow_depth_cm\", \"snow_depth_cm\", 20.5)")'
           try "element rule level" 's.replace("s.notna().mean() >= 0.5", "s.notna().mean() >= 0.45")'
+          try "element rule strict" 's.replace("s.notna().mean() >= 0.5", "s.notna().mean() > 0.5")'
           try "fill level" 's.replace("MIN_FILLED = 0.9 ", "MIN_FILLED = 0.85 ")'
           try "fill gate at its level" 's.replace("np.isfinite(v[inside]).mean() < MIN_FILLED", "np.isfinite(v[inside]).mean() <= MIN_FILLED")'
           try "fill minimum lowered" 's.replace("inside.sum() >= 1000", "inside.sum() >= 999")'
