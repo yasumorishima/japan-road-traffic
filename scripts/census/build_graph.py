@@ -107,7 +107,7 @@ E = pd.DataFrame({"a": np.minimum(u, v)[passable], "b": np.maximum(u, v)[passabl
 E = E[E.a != E.b].groupby(["a", "b"], as_index=False).L.min()  # a section whose two ends are one point is no path
 print("edges", len(E), "from", int(passable.sum()), "passable sections")
 W = coo_matrix((np.r_[E.L, E.L], (np.r_[E.a, E.b], np.r_[E.b, E.a])), shape=(len(roots), len(roots))).tocsr()
-assert W.nnz <= 2 * len(E) and np.isclose(W.sum(), 2 * E.L.sum())  # no entry summed with another
+assert W.nnz == 2 * len(E) and np.isclose(W.sum(), 2 * E.L.sum())  # no entry summed with another
 
 C = pd.read_csv("census/census_r3_match.csv", dtype={"census_section": str})
 P = pd.read_csv("repo/data/counters.csv", dtype={"municipality_code": str}).set_index("counter_id")
@@ -166,7 +166,7 @@ for i in range(k):
         line = 2 * 6371.0 * np.arcsin(np.sqrt(h))
         others = [m for m in range(k) if m not in (i, j)]
         direct = not np.any(R[i, others] + R[others, j] <= R[i, j] + 0.125)
-        out.append(dict(counter_a=C.counter_id[i], counter_b=C.counter_id[j], road_km=round(R[i, j], 1), line_km=round(line, 1),
+        out.append(dict(counter_a=C.counter_id[i], counter_b=C.counter_id[j], road_km=round(R[i, j], 2), line_km=round(line, 1),
                         same_route=C.route_ja[i] == C.route_ja[j], direct=direct, _slack=plen[i] / 2 + plen[j] / 2))
 O = pd.DataFrame(out)
 assert (O.counter_a < O.counter_b).all() and O.road_km.gt(0).all() and not O.duplicated(["counter_a", "counter_b"]).any()

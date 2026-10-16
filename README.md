@@ -153,7 +153,7 @@ Checks: a straight line cannot be longer than the road, and it is longer by more
 between them, the hour-by-hour departure from their usual traffic (`vs_baseline`) moves together more when the road
 distance is shorter, beyond what the straight-line distance says (Spearman of the correlation of the two series with
 road distance against straight-line distance: -0.18 against -0.10 at 10-20 km, -0.27 against -0.13 at 20-40 km, -0.13
-against +0.04 at 40-60 km; for counters on different routes -0.26 against -0.13 at 20-40 km; no difference below 10 km,
+against +0.03 at 40-60 km; for counters on different routes -0.26 against -0.13 at 20-40 km; no difference below 10 km,
 -0.31 against -0.29; `scripts/census/graph_validate.py`).
 
 Building the graph also found one wrong tie in the census table: counters 3110650 (山北町, Kanagawa) and 5114680 (小山町,
