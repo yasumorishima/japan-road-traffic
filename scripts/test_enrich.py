@@ -69,8 +69,10 @@ for X in ("2026-08-05", "2026-08-20"):
     upto = planted.time_jst.dt.normalize() <= pd.Timestamp(X)
     a, b = full.baseline_vehicles[upto].astype(float), planted.baseline_vehicles[upto].astype(float)
     assert ((a == b) | (a.isna() & b.isna())).all(), X
-    later = planted.time_jst.dt.normalize() > pd.Timestamp(X) + pd.Timedelta(days=7)
-    assert (planted.baseline_vehicles[later].dropna() == 99999).any()  # and it does reach later days
+    # and it does reach the days whose 4 baseline days are all planted (from 4 weeks later; 70 days end on 09-08)
+    later = planted.time_jst.dt.normalize() >= pd.Timestamp(X) + pd.Timedelta(days=28)
+    assert later.sum() == 0 or (planted.baseline_vehicles[later].dropna() == 99999).mean() > 0.9, X
+    assert X != "2026-08-05" or later.sum() > 0
 # a customary break day is not used as a baseline day
 ob = base.copy()
 ob.loc[ob.customary_break.notna(), "vehicles"] = 99999
