@@ -199,7 +199,9 @@ RUSH = "rush hours (7-9h or 17-19h, whichever is congested)"
 CENSUS_COLS = {
     "counter_id": "Counter ID (常時観測点コード); join with sensor",
     "sensor": "Always loop (permanent counter)",
-    "census_section": "Census section number (交通調査基本区間番号), 11 digits with its leading zero; read it as text",
+    "census_section": ("Census section number (交通調査基本区間番号), 11 digits with its leading zero; read it as text. "
+                       "It is the observation section of the census survey unit, whose values the census gives; "
+                       "the unit can span several sections (see placed_from_section)"),
     "route_number": "National route number (一般国道 N 号); empty for a route the census numbers outside 1-507",
     "route_ja": "Route name in the census (Japanese), with the bypass or road name in brackets when it has one",
     "route_en": "Route in English, e.g. National Route 5",
@@ -218,6 +220,37 @@ CENSUS_COLS = {
     "town_in_address": "True when the counter's town name appears in the census observation address",
     "match_vol_ratio": "Counter's September 2026 weekday median 24-hour volume / census 2021 volume; used to choose "
                        "the section (kept between 0.86 and 1.16), not a measure of traffic growth",
+    "placed_from_section": ("First census section of the stretch the counter is placed on in road_graph_2021.csv: "
+                            "sections of its survey unit in the counter's own municipality joined end to start (the "
+                            "stretch holding census_section when there is one); read it as text"),
+    "placed_to_section": ("Last census section of that stretch (the same as placed_from_section for a one-section "
+                          "stretch). The numbers between the two are not all on the stretch"),
+    "placed_km": ("Length of that stretch, km (census section lengths). road_graph_2021.csv measures from its middle, "
+                  "assuming the counter is on that stretch (the part of the unit in its municipality, or the whole unit when placed_in_municipality is False; the "
+                  "census does not say where on the unit a counter is)"),
+    "placed_in_municipality": ("False for the 4 counters whose survey unit has no section in the counter's own "
+                               "municipality (counters near a municipal border): they are placed on the whole unit, "
+                               "which can lie partly in a neighbouring municipality"),
+}
+
+GRAPH_DESC = ("Road distance between the 365 counters of census_2021_counters.csv on the 2021 Road Traffic Census road "
+              "network (all census roads: expressways, national highways, prefectural and designated-city roads, except "
+              "sections impassable to vehicles; sections joined where the census describes their ends as the same "
+              "junction, border or point). One row per pair within 60 km by road, "
+              "counter_a < counter_b; use it in both directions. For a graph model, e.g. a Gaussian kernel of road_km "
+              "or the direct pairs only.")
+GRAPH_COLS = {
+    "counter_a": "Counter ID (常時観測点コード) of a loop counter in census_2021_counters.csv; the smaller ID of the pair",
+    "counter_b": "Counter ID of the other counter of the pair",
+    "road_km": ("Shortest distance by road, km, between the middles of the two counters' stretches (see placed_km in "
+                "census_2021_counters.csv; the path can leave a stretch at any junction along it), from census "
+                "section lengths (given in 0.1 km), so in 0.05 km steps"),
+    "line_km": ("Straight-line distance, km, between the two counters' coordinates in counters.csv when the graph was "
+                "built. It can exceed road_km by up to half of both placed_km; for 4 pairs it does by 0.75-1.35 km "
+                "more than that"),
+    "same_route": "True when both counters are on the same census route (route_ja)",
+    "direct": ("True when no third counter of the table lies on the shortest path (within 0.1 km), i.e. the two are "
+               "neighbours along the road"),
 }
 
 FILE_DESC = {
@@ -252,6 +285,9 @@ def main():
             cols = pd.read_csv(p, nrows=0).columns.tolist()
             desc = CENSUS_DESC
             table = CENSUS_COLS
+        elif n == "road_graph_2021.csv":
+            cols = pd.read_csv(p, nrows=0).columns.tolist()
+            desc, table = GRAPH_DESC, GRAPH_COLS
         elif re.match(r"^weather_hourly_\d{4}-\d{2}_\d{2}-\d{2}\.parquet$", n):
             cols = pq.read_schema(p).names
             mm = re.match(r"^weather_hourly_(\d{4}-\d{2})_(\d{2})-(\d{2})", n)
@@ -275,7 +311,7 @@ def main():
         resources.append({"path": n, "description": desc,
                           "schema": {"fields": [{"name": c, "description": table[c]} for c in cols]}})
         files[n] = {"description": desc, "columns": {c: table[c] for c in cols}}
-    need = {"counters.csv", "census_2021_counters.csv", "calendar.csv", "weather_stations.csv"}
+    need = {"counters.csv", "census_2021_counters.csv", "road_graph_2021.csv", "calendar.csv", "weather_stations.csv"}
     if not any(n.startswith("hourly_") for n in files) or not any(n.startswith("weather_hourly_") for n in files) \
             or not need <= set(files):
         sys.exit(f"the build lacks an hourly or weather file or one of {sorted(need)}")

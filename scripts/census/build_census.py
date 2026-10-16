@@ -10,7 +10,10 @@ this choice, it is no longer an independent check; the up-minus-down large-vehic
 Second amendment after the code review (2026-10-08): a pair is dropped when the GSI address search resolved the
 observation address only to the prefecture or the municipality (8 pairs: two in Akita geocoded to the prefecture
 point, one of them, counter 2110212, tied to a section about 10 km away; six to a city or town point). The
-distance to such a point does not place the section, so "within 3 km" would not hold for them."""
+distance to such a point does not place the section, so "within 3 km" would not hold for them.
+Third amendment (2026-10-17, found by the audit of the road graph, build_graph.py): two ties are swapped when neither
+counter's town name is in its census address and, swapped, both are, with volume, fingerprints and the 3 km limit still
+passing (one case, on route 246 at the Kanagawa-Shizuoka border; see the comment above the loop)."""
 import csv, glob, io, json, re
 import numpy as np, pandas as pd
 PREF = ("北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県 茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県 新潟県 富山県 "
@@ -57,6 +60,53 @@ def coarse(addr, pref):
     return rest == "" or rest in MUN
 
 
+# Third amendment (2026-10-17, found by the audit of the road graph): the one-to-one assignment can hand two counters a
+# few hundred metres apart each other's section. Counters 3110650 (山北町川西, Kanagawa) and 5114680 (小山町小山,
+# Shizuoka) on route 246 at the prefecture border got 小山町小山's and 山北町川西's sections: neither town name was in its
+# address, and both pairs passed on volume and fingerprints because the two sections carry nearly the same traffic.
+# Swap two pairs when neither has its town name in the address and, swapped, both have it and both still pass the rule
+# (|lr| < 0.15 and both fingerprints). The swapped pairs take the other section's volume, fingerprints and distance.
+cv = pd.read_csv("census/counter_vol.csv").query("sensor == 'loop'").set_index("counter_id").vol24
+XY = C[C.sensor == "loop"].set_index("counter_id")[["latitude", "longitude"]]
+
+
+def km_to(cid, sec):
+    a = re.sub(r"\s", "", rows[sec][1]); pref = rows[sec][3]
+    lon, lat = geo[a if a.startswith(pref) else pref + a][0]["geometry"]["coordinates"]
+    la1, lo1, la2, lo2 = map(np.radians, (XY.latitude[cid], XY.longitude[cid], lat, lon))
+    return 2 * 6371.0 * np.arcsin(np.sqrt(np.sin((la2 - la1) / 2) ** 2 + np.cos(la1) * np.cos(la2) * np.sin((lo2 - lo1) / 2) ** 2))
+
+
+def town_in(cid, sec):
+    t = norm(town.get(cid, "")); return len(t) >= 2 and t in rows[sec][1]
+
+
+# Only two-way swaps: a three-way rotation also exists (板橋区: 3310820, 3310930 and 3310920 each hold the next one's
+# section; all three fail the rule and stay out). A counter is swapped at most once, and the new pairs must still be
+# within the 3 km of the assignment.
+K = M[(M.lr < 0.15) & M.section.isin(rows)].set_index("counter_id")
+cand = [c for c in K.index if not town_in(c, K.section[c])]
+done = set()
+for i, a in enumerate(cand):
+    for b in cand[i + 1:]:
+        if a in done or b in done:
+            continue
+        sa, sb = K.section[a], K.section[b]
+        if not (town_in(a, sb) and town_in(b, sa)):
+            continue
+        new = {}
+        for c, s, o in ((a, sb, b), (b, sa, a)):
+            lr = abs(np.log(cv[c] / num(rows[s][0][61])))
+            fp = abs(K.up_c[c] - K.up_s[o]) < 2 and abs(K.dn_c[c] - K.dn_s[o]) < 0.05
+            km = km_to(c, s)
+            new[c] = dict(section=s, lr=lr, km=km, up_s=K.up_s[o], dn_s=K.dn_s[o], ok=lr < 0.15 and fp and km <= 3)
+        print("swap candidate", a, sa, "<->", b, sb, {c: (round(v["lr"], 3), round(v["km"], 2), v["ok"]) for c, v in new.items()})
+        if all(v["ok"] for v in new.values()):
+            for c, v in new.items():
+                for k2 in ("section", "lr", "km", "up_s", "dn_s"):
+                    M.loc[M.counter_id == c, k2] = v[k2]
+            done |= {a, b}
+            print("  swapped")
 EN = {"東北中央自動車道": "Tohoku-Chuo Expressway"}  # national highways numbered outside 1-507 in the census
 out = []
 for m in M[M.lr < 0.15].itertuples():
