@@ -75,6 +75,15 @@ jobs:
           try "coverage gate minimum lowered" 's.replace("len(counters) >= 100 and", "len(counters) >= 50 and")'
           try "coverage gate at its level" 's.replace("near.mean() < MIN_STATION[col]", "near.mean() <= MIN_STATION[col]")'
           try "snow limit" 's.replace("(\"snow_depth_cm\", \"snow_depth_cm\", 20)", "(\"snow_depth_cm\", \"snow_depth_cm\", 1000)")'
+          try "rain limit 10.5 km" 's.replace("(\"precip_mm\", \"precip_1h_mm\", 10)", "(\"precip_mm\", \"precip_1h_mm\", 10.5)")'
+          try "temperature limit 20.5 km" 's.replace("(\"temp_c\", \"temp_c\", 20)", "(\"temp_c\", \"temp_c\", 20.5)")'
+          try "wind limit 19.5 km" 's.replace("(\"wind_ms\", \"wind_ms\", 20)", "(\"wind_ms\", \"wind_ms\", 19.5)")'
+          try "snow limit 20.5 km" 's.replace("(\"snow_depth_cm\", \"snow_depth_cm\", 20)", "(\"snow_depth_cm\", \"snow_depth_cm\", 20.5)")'
+          try "element rule level" 's.replace("s.notna().mean() >= 0.5", "s.notna().mean() >= 0.45")'
+          try "fill level" 's.replace("MIN_FILLED = 0.9 ", "MIN_FILLED = 0.85 ")'
+          try "fill gate at its level" 's.replace("np.isfinite(v[inside]).mean() < MIN_FILLED", "np.isfinite(v[inside]).mean() <= MIN_FILLED")'
+          try "fill minimum lowered" 's.replace("inside.sum() >= 1000", "inside.sum() >= 999")'
+          try "snow in the fill gate" 's.replace("el != \"snow_depth_cm\" and ", "")'
       - name: Full build from the archive and an independent recomputation
         env:
           GH_TOKEN: ${{ github.token }}

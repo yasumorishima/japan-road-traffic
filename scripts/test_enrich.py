@@ -119,6 +119,28 @@ try:
 except SystemExit as e:
     assert "got a value" in str(e)
 enrich.add_weather(big.copy(), w, near)
+# the fill gate: 90% of the rows with a station and an archived hour, checked from 1,000 such rows, not for snow
+hrs = pd.date_range("2026-10-01", periods=20, freq="h")
+w3 = pd.DataFrame({"time_jst": hrs, "station_id": 100, "precip_1h_mm": 1.0, "temp_c": 10.0, "wind_ms": 2.0,
+                   "snow_depth_cm": np.nan})
+near3 = pd.DataFrame({f"{c}_station_id": pd.array([100], "Int32") for c in ("precip", "temp", "wind", "snow")},
+                     index=pd.MultiIndex.from_tuples([(1, "loop")], names=["counter_id", "sensor"]))
+rows3 = pd.DataFrame({"time_jst": hrs.repeat(50), "counter_id": np.ones(1000, "int32"), "sensor": "loop"})
+
+
+def fill(missing_hours, n_rows=1000):
+    ww = w3.copy()
+    ww.loc[:missing_hours - 1, "precip_1h_mm"] = np.nan
+    enrich.add_weather(rows3.iloc[:n_rows].copy(), ww, near3)
+
+
+fill(2)          # 90% passes (snow, empty everywhere, is not checked)
+fill(3, 999)     # below 1,000 rows the gate does not apply
+try:
+    fill(3)      # 85%
+    raise AssertionError("an 85% fill passed")
+except SystemExit as e:
+    assert str(e).startswith("precip_mm:"), e
 
 # 4. stations: nearest one that reports the element, within its limit; values flagged in the source are blanked
 import amedas
@@ -133,14 +155,20 @@ with tempfile.TemporaryDirectory() as tmp:
                      "snow_depth_cm": 5.0, "snow_depth_cm_aqc": 0})                       # 15 km
         rows.append({"obs_time_jst": t, "hour_start_jst": t, "station_id": 3, "precip_1h_mm": 9.0, "precip_1h_mm_aqc": 0,
                      "temp_c": 9.0, "temp_c_aqc": 0, "wind_ms": 9.0, "wind_ms_aqc": 0})   # no coordinates
+        # far away: temperature flagged in 12 of the 24 hours (reports it) and in 11 (does not)
+        rows.append({"obs_time_jst": t, "hour_start_jst": t, "station_id": 4, **({"temp_c": 9.0, "temp_c_aqc": 0} if h < 12 else {})})
+        rows.append({"obs_time_jst": t, "hour_start_jst": t, "station_id": 5, **({"temp_c": 9.0, "temp_c_aqc": 0} if h < 11 else {})})
     amedas.write_csv(os.path.join(tmp, "amedas_20261005.csv.gz"), rows, amedas.COLUMNS)
     amedas.write_csv(os.path.join(tmp, "amedas_stations_202610.csv.gz"),
                      [{"station_id": 1, "type": "C", "elems": "01000000", "lat": 35.05, "lon": 139.0},
                       {"station_id": 2, "type": "C", "elems": "11100000", "lat": 35.135, "lon": 139.0},
-                      {"station_id": 3, "type": "C", "elems": "11100000", "lat": None, "lon": None}],
+                      {"station_id": 3, "type": "C", "elems": "11100000", "lat": None, "lon": None},
+                      {"station_id": 4, "type": "C", "elems": "10000000", "lat": 45.0, "lon": 139.0},
+                      {"station_id": 5, "type": "C", "elems": "10000000", "lat": 46.0, "lon": 139.0}],
                      amedas.STATION_COLUMNS)
     w, st, has = enrich.load_weather(tmp)
     assert bool(has.loc[1, "precip_1h_mm"]) and not has.loc[1, "temp_c"] and bool(has.loc[2, "temp_c"])
+    assert bool(has.loc[4, "temp_c"]) and not has.loc[5, "temp_c"]  # an element is reported in at least half the rows
     assert pd.isna(w.set_index(["time_jst", "station_id"]).loc[(pd.Timestamp("2026-10-05 05:00"), 1), "precip_1h_mm"])
     cn = pd.DataFrame({"latitude": [35.0, 35.0, 36.0, None], "longitude": [139.0, 139.0, 139.0, 139.0]})
     nr = enrich.nearest_stations(cn, st, has)
@@ -159,6 +187,14 @@ with tempfile.TemporaryDirectory() as tmp:
     except SystemExit as e:
         assert "got a station" in str(e)
     enrich.nearest_stations(far.iloc[:99], st, has)  # below 100 rows the coverage gates do not apply
+    # distance limits: rain within 10 km, the rest within 20 km (counters 9.9, 10.1, 19.9 and 20.1 km north of one station)
+    st4 = pd.DataFrame({"station_id": [7], "lat": [35.0], "lon": [139.0]})
+    has4 = pd.DataFrame({el: [True] for _, el, _ in enrich.WEATHER}, index=pd.Index([7], name="station_id"))
+    lim = pd.DataFrame({"latitude": [35.0 + d / 111.195 for d in (9.9, 10.1, 19.9, 20.1)], "longitude": 139.0})
+    nl = enrich.nearest_stations(lim, st4, has4)
+    assert nl.precip_station_id.notna().tolist() == [True, False, False, False], nl
+    for c in ("temp", "wind", "snow"):
+        assert nl[f"{c}_station_id"].notna().tolist() == [True, True, True, False], (c, nl)
     # each coverage gate: exactly at it passes, just below it stops the build on that element
     # (35.0: 5.56 km from station 1, both stations within 20 km; 35.3: 18.35 km from station 2, no rain within 10 km)
     def cov(groups):
