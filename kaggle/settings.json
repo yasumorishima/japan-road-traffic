@@ -22,7 +22,7 @@
       "columns": {
         "counter_id": "Counter ID (常時観測点コード); join with sensor",
         "sensor": "Always loop (permanent counter)",
-        "census_section": "Census section number (交通調査基本区間番号), 11 digits with its leading zero; read it as text",
+        "census_section": "Census section number (交通調査基本区間番号), 11 digits with its leading zero; read it as text. It is the observation section of the census survey unit, whose values the census gives; the unit can span several sections (see placed_from_section)",
         "route_number": "National route number (一般国道 N 号); empty for a route the census numbers outside 1-507",
         "route_ja": "Route name in the census (Japanese), with the bypass or road name in brackets when it has one",
         "route_en": "Route in English, e.g. National Route 5",
@@ -38,7 +38,11 @@
         "offpeak_speed_down_kmh": "2021 autumn weekday average travel speed, km/h, daytime off-peak (9-17h), the 'down' direction (下り) (census, from ETC2.0 probe data); empty where the census did not measure it. A static 2021 value, not today's speed",
         "match_km": "Distance, km, between the counter and the geocoded census observation address (resolved to the town or a finer level; a pair resolved only to the municipality was left out)",
         "town_in_address": "True when the counter's town name appears in the census observation address",
-        "match_vol_ratio": "Counter's September 2026 weekday median 24-hour volume / census 2021 volume; used to choose the section (kept between 0.86 and 1.16), not a measure of traffic growth"
+        "match_vol_ratio": "Counter's September 2026 weekday median 24-hour volume / census 2021 volume; used to choose the section (kept between 0.86 and 1.16), not a measure of traffic growth",
+        "placed_from_section": "First census section of the stretch the counter is placed on in road_graph_2021.csv: sections of its survey unit in the counter's own municipality joined end to start (the stretch holding census_section when there is one); read it as text",
+        "placed_to_section": "Last census section of that stretch (the same as placed_from_section for a one-section stretch). The numbers between the two are not all on the stretch",
+        "placed_km": "Length of that stretch, km (census section lengths). road_graph_2021.csv measures from its middle, assuming the counter is on that stretch (the part of the unit in its municipality, or the whole unit when placed_in_municipality is False; the census does not say where on the unit a counter is)",
+        "placed_in_municipality": "False for the 4 counters whose survey unit has no section in the counter's own municipality (counters near a municipal border): they are placed on the whole unit, which can lie partly in a neighbouring municipality"
       }
     },
     "counters.csv": {
@@ -806,6 +810,17 @@
         "temp_c": "Hourly files only: air temperature at the end of the hour, deg C, from the counter's nearest AMeDAS station that reports temperature (within 20 km; the station is temp_station_id in counters.csv), JMA observations with the normal quality flag only. Weather is archived from 2026-09-29; earlier rows are empty",
         "wind_ms": "Hourly files only: wind speed at the end of the hour, m/s, from the counter's nearest AMeDAS station that reports wind (within 20 km; the station is wind_station_id in counters.csv), JMA observations with the normal quality flag only. Weather is archived from 2026-09-29; earlier rows are empty",
         "snow_depth_cm": "Hourly files only: snow depth at the end of the hour, cm, from the counter's nearest AMeDAS station that reports snow depth (within 20 km; the station is snow_station_id in counters.csv), JMA observations with the normal quality flag only. Weather is archived from 2026-09-29; earlier rows are empty. JMA flags snow depth outside the snow season, so it is empty then"
+      }
+    },
+    "road_graph_2021.csv": {
+      "description": "Road distance between the 365 counters of census_2021_counters.csv on the 2021 Road Traffic Census road network (all census roads: expressways, national highways, prefectural and designated-city roads, except sections impassable to vehicles; sections joined where the census describes their ends as the same junction, border or point). One row per pair within 60 km by road, counter_a < counter_b; use it in both directions. For a graph model, e.g. a Gaussian kernel of road_km or the direct pairs only.",
+      "columns": {
+        "counter_a": "Counter ID (常時観測点コード) of a loop counter in census_2021_counters.csv; the smaller ID of the pair",
+        "counter_b": "Counter ID of the other counter of the pair",
+        "road_km": "Shortest distance by road, km, between the middles of the two counters' stretches (see placed_km in census_2021_counters.csv; the path can leave a stretch at any junction along it), from census section lengths (given in 0.1 km), so in 0.05 km steps",
+        "line_km": "Straight-line distance, km, between the two counters' coordinates in counters.csv when the graph was built. It can exceed road_km by up to half of both placed_km; for 4 pairs it does by 0.75-1.35 km more than that",
+        "same_route": "True when both counters are on the same census route (route_ja)",
+        "direct": "True when no third counter of the table lies on the shortest path (within 0.1 km), i.e. the two are neighbours along the road"
       }
     },
     "weather_hourly_2026-09_21-30.parquet": {
