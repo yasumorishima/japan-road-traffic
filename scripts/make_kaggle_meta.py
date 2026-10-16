@@ -248,14 +248,19 @@ DAILY_COLS = {
     "day_off": CALENDAR_COLS["day_off"],
     "days_off_in_run": CALENDAR_COLS["days_off_in_run"],
     "customary_break": CALENDAR_COLS["customary_break"],
-    "hours": ("Number of hours of the day with a vehicle count (0-24). Below 24 when an hour is missing at the source "
-              "or a permanent counter flags a fault; 0 for a counter that reported only flagged or empty hours"),
-    "vehicles": "Vehicles in the day, both directions." + FULL,
+    "hours": ("Number of hours of the day with a vehicle count in both directions (0-24). Below 24 when an hour is "
+              "missing at the source or a permanent counter flags a fault; 0 for a counter whose hours were all flagged "
+              "or empty, and for a counter that counts one direction only (use the hourly up_/down_ columns for it). "
+              "CCTV hours built from incomplete five-minute data (missing_processing in the hourly files) count"),
+    "all_zero": ("True when all 24 hours read 0 vehicles: on these roads a stopped camera or counter, not an empty road "
+                 "(most are CCTV). The day's counts are then left empty"),
+    "vehicles": "Vehicles in the day, both directions." + FULL + "; empty when all_zero",
     "large_vehicles": "Large vehicles in the day, both directions (up_large + down_large)." + FULL,
     "peak_hour": "Hour (0-23, the hour starting then) with the most vehicles; the earliest on a tie." + FULL.replace(" carry it", " carry a count"),
     "baseline_vehicles": ("Sum over the day of the hourly baseline (the usual count of the same counter, hour and weekday "
                           "from earlier days; see baseline_vehicles in the hourly files)." + FULL),
-    "vs_baseline": "vehicles / baseline_vehicles for the day (1.2 = 20% more than usual)",
+    "vs_baseline": ("vehicles / baseline_vehicles for the day (1.2 = 20% more than usual); empty when either is empty "
+                    "or the baseline is 0"),
     "precip_mm": "Rain over the day at the counter's nearest AMeDAS station within 10 km, mm." + FULL,
     "wet_hours": "Hours of the day with at least 1 mm of rain at that station." + FULL.replace(" carry it", " carry a rain value"),
     "temp_c": "Mean of the 24 hourly temperatures at the nearest AMeDAS station within 20 km, deg C." + FULL,

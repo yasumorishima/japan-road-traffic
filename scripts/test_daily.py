@@ -33,13 +33,17 @@ day("2026-10-01", 9, veh=lambda h: None)                                # every 
 day("2026-10-01", 10, sensor="cctv")                                    # same ID, other sensor
 day("2026-10-01", 10, sensor="loop")
 day("2026-10-02", 1)                                                    # the next day of counter 1
+day("2026-10-01", 11, veh=lambda h: 100, base=lambda h: 300.0)          # vs_baseline 1/3, written to 3 decimals
+day("2026-10-01", 12, sensor="cctv", veh=lambda h: 0)                   # 24 hours of 0: a stopped camera
+day("2026-10-01", 13, veh=lambda h: 50, base=lambda h: 0.0)             # usual count 0: vs_baseline empty
+day("2026-10-01", 14, temp=lambda h: None if h == 12 else 20.0)         # one temperature missing: no mean
 df = pd.DataFrame(rows)
 for c in ("vehicles", "up_large", "down_large"):
     df[c] = df[c].astype("Int32")
 df["customary_break"] = df.customary_break.astype("string")
 out = daily.summarise(df)
 assert list(out.columns) == daily.COLS
-assert len(out) == 12 and not out.duplicated(["date", "counter_id", "sensor"]).any()
+assert len(out) == 16 and not out.duplicated(["date", "counter_id", "sensor"]).any()
 
 # naive recomputation
 for r in out.itertuples(index=False):
@@ -49,12 +53,15 @@ for r in out.itertuples(index=False):
     have = [x for x in v if x is not None]
     assert r.hours == len(have), (r, len(have))
     full_v = len(s) == 24 and len(have) == 24
-    exp = sum(have) if full_v else None
+    zero = full_v and sum(have) == 0
+    assert r.all_zero == zero, (r.counter_id, r.all_zero)
+    counted = full_v and not zero
+    exp = sum(have) if counted else None
     assert (pd.isna(r.vehicles) and exp is None) or r.vehicles == exp, (r.counter_id, r.vehicles, exp)
     lg = [x["up_large"] + x["down_large"] if x["up_large"] is not None and x["vehicles"] is not None else None for x in s]
-    exp = sum(lg) if len(s) == 24 and None not in lg else None
+    exp = sum(lg) if counted and None not in lg else None
     assert (pd.isna(r.large_vehicles) and exp is None) or r.large_vehicles == exp, (r.counter_id, r.large_vehicles, exp)
-    if full_v:
+    if counted:
         best = max(v); exp = min(x["time_jst"].hour for x in s if x["vehicles"] == best)
         assert r.peak_hour == exp, (r.counter_id, r.peak_hour, exp)
     else:
@@ -62,7 +69,7 @@ for r in out.itertuples(index=False):
     b = [x["baseline_vehicles"] if x["vehicles"] is not None else None for x in s]
     exp = round(sum(b)) if len(s) == 24 and None not in b else None
     assert (pd.isna(r.baseline_vehicles) and exp is None) or r.baseline_vehicles == exp, (r.counter_id, r.baseline_vehicles, exp)
-    if not pd.isna(r.vehicles) and not pd.isna(r.baseline_vehicles):
+    if not pd.isna(r.vehicles) and not pd.isna(r.baseline_vehicles) and r.baseline_vehicles > 0:
         assert abs(r.vs_baseline - round(r.vehicles / r.baseline_vehicles, 3)) < 1e-9
     else:
         assert pd.isna(r.vs_baseline)
@@ -72,7 +79,10 @@ for r in out.itertuples(index=False):
     else:
         assert pd.isna(r.precip_mm) and pd.isna(r.wet_hours)
     t = [x["temp_c"] for x in s]
-    assert abs(r.temp_c - round(sum(t) / 24, 1)) < 1e-9 if len(s) == 24 else pd.isna(r.temp_c)
+    if len(s) == 24 and None not in t:
+        assert abs(r.temp_c - round(sum(t) / 24, 1)) < 1e-9
+    else:
+        assert pd.isna(r.temp_c), (r.counter_id, r.temp_c)
     assert r.weekday == s[0]["weekday"] and r.day_off == s[0]["day_off"] and r.prefecture_en == "Kanagawa"
 
 # the cases, by hand
@@ -86,6 +96,14 @@ assert pd.isna(o.loc[("2026-10-01", 7, "loop"), "precip_mm"])
 assert o.loc[("2026-10-01", 8, "loop"), "wet_hours"] == 12 and o.loc[("2026-10-01", 8, "loop"), "precip_mm"] == 18.0
 assert o.loc[("2026-10-01", 9, "loop"), "hours"] == 0 and pd.isna(o.loc[("2026-10-01", 9, "loop"), "vehicles"])
 assert ("2026-10-01", 10, "cctv") in o.index and ("2026-10-01", 10, "loop") in o.index
+assert o.loc[("2026-10-01", 11, "loop"), "vs_baseline"] == 0.333 and o.loc[("2026-10-01", 11, "loop"), "vehicles"] == 2400
+z = o.loc[("2026-10-01", 12, "cctv")]
+assert z.all_zero and z.hours == 24 and pd.isna(z.vehicles) and pd.isna(z.vs_baseline) and pd.isna(z.peak_hour)
+assert pd.isna(z.large_vehicles) and not o.drop(index=[("2026-10-01", 12, "cctv")]).all_zero.any()
+b0 = o.loc[("2026-10-01", 13, "loop")]
+assert b0.vehicles == 1200 and b0.baseline_vehicles == 0 and pd.isna(b0.vs_baseline)
+assert not np.isinf(out.vs_baseline.astype(float)).any()
+assert pd.isna(o.loc[("2026-10-01", 14, "loop"), "temp_c"]) and o.loc[("2026-10-01", 14, "loop"), "hours"] == 24
 # more than 24 rows for one counter-day stops it
 try:
     daily.summarise(pd.concat([df, df.iloc[[0]]], ignore_index=True))

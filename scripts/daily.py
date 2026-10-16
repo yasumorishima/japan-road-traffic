@@ -1,10 +1,13 @@
 """daily_summary.csv: one row per counter, sensor and day (JST) from the hourly files, the small file to start from.
 A day's totals are given only when all 24 hours carry the value (a counter with a missing or flagged hour has
-`hours` < 24 and blank totals), so a total never mixes a short day with a full one."""
+`hours` < 24 and blank totals), so a total never mixes a short day with a full one. A day whose 24 hours all read
+0 vehicles is marked all_zero and its counts are left blank: on national highways and expressways that is a stopped
+camera or counter (2,137 of 2,237 such days through 2026-10-15 were CCTV), not an empty road. vs_baseline follows the
+hourly rule: empty unless the day's baseline is above 0."""
 import numpy as np, pandas as pd
 
 CAL = ["weekday", "is_holiday", "day_off", "days_off_in_run", "customary_break"]
-COLS = ["date", "counter_id", "sensor", "road_type", "prefecture_en", *CAL, "hours", "vehicles", "large_vehicles",
+COLS = ["date", "counter_id", "sensor", "road_type", "prefecture_en", *CAL, "hours", "all_zero", "vehicles", "large_vehicles",
         "peak_hour", "baseline_vehicles", "vs_baseline", "precip_mm", "wet_hours", "temp_c"]
 
 
@@ -16,7 +19,7 @@ def summarise(df):
         **{c: df[c] for c in CAL},
         "hour": df.time_jst.dt.hour,
         "v": df.vehicles.astype("float64"),
-        "lg": (df.up_large.astype("float64") + df.down_large.astype("float64")).where(df.vehicles.notna()),
+        "lg": df.up_large.astype("float64") + df.down_large.astype("float64"),  # used only on counted days
         "b": df.baseline_vehicles.astype("float64").where(df.vehicles.notna()),
         "p": df.precip_mm.astype("float64"), "t": df.temp_c.astype("float64")})
     d["wet"] = (d.p >= 1).astype("float64").where(d.p.notna())
@@ -27,13 +30,17 @@ def summarise(df):
         raise ValueError(f"more than 24 hourly rows for {n[n > 24].index[0]}")
     full = lambda s: g[s].count().eq(24) & n.eq(24)  # all 24 hours present and carrying the value
     out["hours"] = g.v.count().astype("int8")
-    out["vehicles"] = g.v.sum().where(full("v")).round().astype("Int32")
-    out["large_vehicles"] = g.lg.sum().where(full("lg")).round().astype("Int32")
+    zero = full("v") & g.v.sum().eq(0)
+    out["all_zero"] = zero.astype(bool)
+    counted = full("v") & ~zero
+    out["vehicles"] = g.v.sum().where(counted).round().astype("Int32")
+    out["large_vehicles"] = g.lg.sum().where(full("lg") & counted).round().astype("Int32")
     peak = d.loc[d.v.notna()].sort_values(["v", "hour"], ascending=[False, True]).groupby(
         ["date", "counter_id", "sensor"]).hour.first()  # the busiest hour; the earliest one on a tie
-    out["peak_hour"] = peak.reindex(out.index).where(full("v")).astype("Int8")
+    out["peak_hour"] = peak.reindex(out.index).where(counted).astype("Int8")
     out["baseline_vehicles"] = g.b.sum().where(full("b")).round().astype("Int32")
-    out["vs_baseline"] = (out.vehicles.astype("float64") / out.baseline_vehicles.astype("float64")).round(3)
+    bl = out.baseline_vehicles.astype("float64")
+    out["vs_baseline"] = (out.vehicles.astype("float64") / bl).where(bl > 0).round(3)
     out["precip_mm"] = g.p.sum().where(full("p")).round(1)
     out["wet_hours"] = g.wet.sum().where(full("p")).round().astype("Int8")
     out["temp_c"] = g.t.mean().where(full("t")).round(1)

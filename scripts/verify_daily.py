@@ -15,7 +15,10 @@ k = keys.assign(date=keys.time_jst.dt.strftime("%Y-%m-%d"))[["date", "counter_id
 assert len(k) == len(dd), (len(k), len(dd))
 assert k.merge(dd[["date", "counter_id", "sensor"]], how="outer", indicator=True)._merge.eq("both").all()
 
-pick = dd[["counter_id", "sensor"]].drop_duplicates().sample(40, random_state=11)
+assert not np.isinf(dd.vs_baseline).any(), "vs_baseline has inf"
+# 40 random counters plus every counter with an all-zero day or a zero baseline, so those rules are always checked
+odd = dd[dd.all_zero | (dd.baseline_vehicles == 0)][["counter_id", "sensor"]].drop_duplicates()
+pick = pd.concat([dd[["counter_id", "sensor"]].drop_duplicates().sample(40, random_state=11), odd]).drop_duplicates()
 cols = ["time_jst", "counter_id", "sensor", "vehicles", "up_large", "down_large", "baseline_vehicles", "precip_mm",
         "temp_c", "day_off", "days_off_in_run"]
 h = ds.dataset(files).to_table(columns=cols, filter=ds.field("counter_id").isin(pick.counter_id.tolist())).to_pandas()
@@ -32,10 +35,13 @@ for key, s in by.items():
     have = [int(x) for x in v if not na(x)]
     assert r.hours == len(have), (key, r.hours, len(have))
     full = len(s) == 24 and len(have) == 24
+    zero = full and sum(have) == 0
+    assert bool(r.all_zero) == zero, (key, r.all_zero)
+    full = full and not zero  # an all-zero day has no counts
     exp = sum(have) if full else None
     assert (exp is None and pd.isna(r.vehicles)) or r.vehicles == exp, (key, r.vehicles, exp)
     lg = [None if na(x.vehicles) or na(x.up_large) or na(x.down_large) else int(x.up_large) + int(x.down_large) for x in s]
-    exp = sum(lg) if len(s) == 24 and None not in lg else None
+    exp = sum(lg) if full and None not in lg else None
     assert (exp is None and pd.isna(r.large_vehicles)) or r.large_vehicles == exp, (key, r.large_vehicles, exp)
     if full:
         top = max(have); exp = min(x.time_jst.hour for x in s if not na(x.vehicles) and int(x.vehicles) == top)
@@ -43,8 +49,10 @@ for key, s in by.items():
     bs = [None if na(x.vehicles) or na(x.baseline_vehicles) else float(x.baseline_vehicles) for x in s]
     exp = round(sum(bs)) if len(s) == 24 and None not in bs else None
     assert (exp is None and pd.isna(r.baseline_vehicles)) or r.baseline_vehicles == exp, (key, r.baseline_vehicles, exp)
-    if not pd.isna(r.vehicles) and not pd.isna(r.baseline_vehicles):
+    if not pd.isna(r.vehicles) and not pd.isna(r.baseline_vehicles) and r.baseline_vehicles > 0:
         assert abs(r.vs_baseline - r.vehicles / r.baseline_vehicles) <= 0.0005 + 1e-9, key
+    else:
+        assert pd.isna(r.vs_baseline), (key, r.vs_baseline)
     ps = [None if na(x.precip_mm) else float(x.precip_mm) for x in s]
     if len(s) == 24 and None not in ps:
         assert abs(r.precip_mm - sum(ps)) <= 0.05 + 1e-9 and r.wet_hours == sum(1 for p in ps if p >= 1), key
@@ -57,4 +65,4 @@ for key, s in by.items():
         assert pd.isna(r.temp_c), key
     assert bool(r.day_off) == bool(s[0].day_off) and r.days_off_in_run == s[0].days_off_in_run, key
     n += 1
-print(f"verify_daily: {n} counter-days of {len(pick)} sampled counters recomputed, all equal")
+print(f"verify_daily: {n} counter-days of {len(pick)} counters (40 sampled + {len(odd)} with all-zero days or a zero baseline) recomputed, all equal")
