@@ -112,7 +112,7 @@ assert df[["precip_mm", "temp_c", "wind_ms"]].iloc[3].isna().all() and df.snow_d
 big = pd.DataFrame({"time_jst": pd.date_range("2026-10-01", periods=48, freq="h").repeat(30),
                     "counter_id": np.tile(np.ones(30, "int32"), 48), "sensor": "loop"})
 w2 = w.copy(); w2["time_jst"] = w2.time_jst + pd.Timedelta(minutes=30)  # misaligned hours
-w2 = pd.concat([w2, w.assign(station_id=999)])                          # the hours exist, the station's values do not
+w2 = pd.concat([w2, w[w.station_id == 100].assign(station_id=999)])                          # the hours exist, the station's values do not
 try:
     enrich.add_weather(big, w2, near)
     raise AssertionError("an empty join passed")
