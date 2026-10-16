@@ -16,7 +16,9 @@ entered on the dataset page carry over to later versions.
 Derived columns are appended after the source's columns: vehicles per direction and in total (blank when a
 permanent counter flags a fault, because flagged hours are unreliable even when they carry counts), one flag column,
 the weekday, Japanese national holidays (data/holidays_jp.csv, from the Cabinet Office list) and the prefecture;
-then the calendar, a baseline from earlier days and (hourly files) the nearest AMeDAS weather (enrich.py).
+then, in the hourly files, the calendar, a baseline from earlier days and the nearest AMeDAS weather (enrich.py).
+The five-minute files keep their columns: with five more, a ten-day file (573,000 rows x 47 columns, 26.9 million
+cells) would pass the size at which Kaggle's preview failed before (1.1 million rows x 24 columns, 26.4 million).
   calendar.csv                    one row per day of the data: days off, runs of days off, holiday names
   weather_hourly_YYYY-MM_DD-DD.parquet, weather_stations.csv   the AMeDAS archive (amedas-* releases)"""
 import argparse, calendar, glob, os, re, shutil, sys
@@ -200,7 +202,7 @@ def main():
     cen = counters_en(a.counters, a.names)
     near = enrich.nearest_stations(cen, stations, has)
     near.index = pd.MultiIndex.from_arrays([cen.counter_id.astype("int32"), cen.sensor], names=["counter_id", "sensor"])
-    prev = {}
+    prev = None
     first_day = last_day = None
     groups = {}
     for p in glob.glob(os.path.join(a.src, "**", "*.csv.gz"), recursive=True):
@@ -231,9 +233,9 @@ def main():
             unknown |= new
             continue
         df = derive(df, place, hol, last_year)
-        df = enrich.add_calendar(df, cal)
-        prev[res] = enrich.baseline(df, cal, prev.get(res))
         if res == "1h":
+            df = enrich.add_calendar(df, cal)
+            prev = enrich.baseline(df, cal, prev)
             df = enrich.add_weather(df, w, near)
         name = ("hourly" if res == "1h" else "five_minute_kanto") + f"_{month}.parquet"  # month = 'YYYY-MM_DD-DD'
         df.to_parquet(os.path.join(a.out, name), index=False, compression="zstd", row_group_size=50_000)

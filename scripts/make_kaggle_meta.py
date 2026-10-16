@@ -93,13 +93,13 @@ WX = ("from the counter's nearest AMeDAS station that reports {what} (within {km
       "{name}_station_id in counters.csv), JMA observations with the normal quality flag only. Weather is archived "
       "from 2026-09-29; earlier rows are empty")
 COLS |= {
-    "day_off": "Derived: True on Saturdays, Sundays and national holidays (is_holiday)",
-    "days_off_in_run": "Derived: length of the run of consecutive days off that holds this day (2 = an ordinary "
+    "day_off": "Hourly files only (derived): True on Saturdays, Sundays and national holidays (is_holiday)",
+    "days_off_in_run": "Hourly files only (derived): length of the run of consecutive days off that holds this day (2 = an ordinary "
                        "weekend, 3 = a three-day weekend, 5 = Silver Week 2026); 0 on a working day",
-    "customary_break": "Derived: obon (August 13-16) or new_year (December 29 - January 3, the government offices' "
+    "customary_break": "Hourly files only (derived): obon (August 13-16) or new_year (December 29 - January 3, the government offices' "
                        "year-end holidays); empty otherwise. These are not days off by law, but many firms close",
-    "baseline_vehicles": "Derived: median of vehicles of the same counter, sensor and time of day " + LOOKBACK,
-    "vs_baseline": "Derived: vehicles / baseline_vehicles (1.2 = 20% more than usual); empty when either is empty "
+    "baseline_vehicles": "Hourly files only (derived): median of vehicles of the same counter, sensor and time of day " + LOOKBACK,
+    "vs_baseline": "Hourly files only (derived): vehicles / baseline_vehicles (1.2 = 20% more than usual); empty when either is empty "
                    "or the baseline is 0. A count, not a congestion measure",
     "precip_mm": "Hourly files only: rain in the hour starting at time_jst, mm, " + WX.format(what="precipitation", km=10, name="precip"),
     "temp_c": "Hourly files only: air temperature at the end of the hour, deg C, " + WX.format(what="temperature", km=20, name="temp"),
@@ -134,7 +134,8 @@ for n, (what, k) in {"precip": ("precipitation", 10), "temp": ("temperature", 20
                                        f"this counter: the nearest station reporting it, empty if none is within {k} km")
     COUNTER_COLS[f"{n}_station_km"] = f"Distance, km, from the counter to {n}_station_id"
 CALENDAR_DESC = ("One row per day (JST) of the traffic data: weekday, national holidays with their names in Japanese "
-                 "and English, days off, runs of days off and customary breaks. Join on the date of time_jst.")
+                 "and English, days off, runs of days off and customary breaks. Join on the date of time_jst (the "
+                 "five-minute files have no calendar columns of their own).")
 CALENDAR_COLS = {
     "date": "Date, JST (YYYY-MM-DD)",
     "weekday": "0 = Monday ... 6 = Sunday",

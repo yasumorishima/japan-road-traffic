@@ -155,13 +155,14 @@ with tempfile.TemporaryDirectory() as tmp:
         d = pd.read_parquet(os.path.join(out5, name))
         five = name.startswith("five")
         assert list(d.columns) == (build_kaggle.ORDER + (build_kaggle.STATUS if five else []) + build_kaggle.DERIVED
-                                   + enrich.CAL_ROW + enrich.BASE_ROW + ([] if five else enrich.WEATHER_ROW)), name
-        # 2026-10-05 is a holiday in hol.csv after a weekend: a run of three days off
-        assert d.day_off.all() and (d.days_off_in_run == 3).all() and d.customary_break.isna().all(), name
-        if not five:  # the station is about 6 km away: within every limit; rain of 08:00-09:00 is 9.5 mm
+                                   + ([] if five else enrich.CAL_ROW + enrich.BASE_ROW + enrich.WEATHER_ROW)), name
+        if not five:
+            # 2026-10-05 is a holiday in hol.csv after a weekend: a run of three days off
+            assert d.day_off.all() and (d.days_off_in_run == 3).all() and d.customary_break.isna().all(), name
+            # the station is about 6 km away: within every limit; rain of 08:00-09:00 is 9.5 mm
             assert (d.time_jst.dt.hour == 8).all() and (d.precip_mm == 9.5).all() and (d.wind_ms == 3.0).all()
             assert d.temp_c.isna().all() and d.snow_depth_cm.isna().all()  # flagged in the source; no snow station
-        assert d.baseline_vehicles.isna().all() and d.vs_baseline.isna().all()  # one day: no earlier days
+            assert d.baseline_vehicles.isna().all() and d.vs_baseline.isna().all()  # one day: no earlier days
         loop = d.sensor == "loop"
         for side in ("up", "down"):
             fl = d[[f"{side}_{x}" for x in ("power_failure", "loop_fault", "ultrasonic_fault", "missing")]]
