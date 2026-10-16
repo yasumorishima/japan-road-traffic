@@ -82,5 +82,50 @@ assert bad == 0
 after = h[h.time_jst >= "2026-09-29"]
 print("filled after 09-29:", {k: round(float(after[k].notna().mean()), 3) for k in ("precip_mm", "temp_c", "wind_ms", "snow_depth_cm")})
 print("filled before:", {k: int(h[h.time_jst < "2026-09-29"][k].notna().sum()) for k in ("precip_mm", "temp_c")})
+
+# station choice, recomputed with plain loops for the sampled counters: the nearest station that reports the element
+# (its quality flag present in at least half of its rows), from the newest station table, within the element's limit
+import math
+EL = (("precip", "precip_1h_mm", 10), ("temp", "temp_c", 20), ("wind", "wind_ms", 20), ("snow", "snow_depth_cm", 20))
+day_files = sorted(p for p in glob.glob(os.path.join(wd, "**", "amedas_*.csv.gz"), recursive=True)
+                   if os.path.basename(p)[7:15].isdigit() and len(os.path.basename(p)) == len("amedas_20261005.csv.gz"))
+seen, flagged = {}, {}
+for p in day_files:
+    q = pd.read_csv(p, usecols=["station_id"] + [e + "_aqc" for _, e, _ in EL])
+    for sid, n in q.station_id.value_counts().items():
+        seen[sid] = seen.get(sid, 0) + n
+    for _, e, _ in EL:
+        for sid, n in q.loc[q[e + "_aqc"].notna(), "station_id"].value_counts().items():
+            flagged[(sid, e)] = flagged.get((sid, e), 0) + n
+tables = sorted(glob.glob(os.path.join(wd, "**", "amedas_stations_*.csv.gz"), recursive=True), key=os.path.basename)
+stt = pd.read_csv(tables[-1])
+
+
+def hav(a, b, c, d):
+    a, b, c, d = map(math.radians, (a, b, c, d))
+    return 6371 * 2 * math.asin(math.sqrt(math.sin((c - a) / 2) ** 2 + math.cos(a) * math.cos(c) * math.sin((d - b) / 2) ** 2))
+
+
+ci2 = cn.merge(pick, on=["counter_id", "sensor"])
+checked = 0
+for r in ci2.itertuples():
+    for name, e, lim in EL:
+        best = math.inf
+        dist = {}
+        for s in stt.itertuples():
+            if s.station_id not in seen or flagged.get((s.station_id, e), 0) < 0.5 * seen[s.station_id]:
+                continue
+            if any(pd.isna(x) for x in (r.latitude, r.longitude, s.lat, s.lon)):
+                continue
+            dist[s.station_id] = hav(r.latitude, r.longitude, s.lat, s.lon)
+            best = min(best, dist[s.station_id])
+        sid, dk = getattr(r, f"{name}_station_id"), getattr(r, f"{name}_station_km")
+        if best <= lim:
+            assert pd.notna(sid) and abs(dist[int(sid)] - best) < 1e-6 and abs(float(dk) - best) < 0.006, \
+                (r.counter_id, r.sensor, name, sid, dk, best)
+        else:
+            assert pd.isna(sid) and pd.isna(dk), (r.counter_id, r.sensor, name, sid, dk, best)
+        checked += 1
+print("station choice agrees for", checked, "(counter, element) pairs")
 print("stations within limit:", {k: int(cn[k].notna().sum()) for k in cn.columns if k.endswith("_station_id")}, "of", len(cn))
 print("km max", {k: float(cn[k].max()) for k in cn.columns if k.endswith("_station_km")})

@@ -66,6 +66,12 @@ jobs:
           try "rain limit" 's.replace("(\"precip_mm\", \"precip_1h_mm\", 10)", "(\"precip_mm\", \"precip_1h_mm\", 1000)")'
           try "element rule" 's.replace("s.notna().mean() >= 0.5", "True")'
           try "station coverage gate" 's.replace("near.mean() < MIN_STATION[col]", "False")'
+          try "station without coordinates" 's.replace("D = np.where(np.isfinite(D), D, np.inf)", "D = D")'
+          try "temperature limit" 's.replace("(\"temp_c\", \"temp_c\", 20)", "(\"temp_c\", \"temp_c\", 1000)")'
+          try "rain coverage level" 's.replace("\"precip_mm\": 0.75", "\"precip_mm\": 0.7")'
+          try "temperature coverage level" 's.replace("\"temp_c\": 0.9,", "\"temp_c\": 0.85,")'
+          try "wind coverage level" 's.replace("\"wind_ms\": 0.9}", "\"wind_ms\": 0.85}")'
+          try "coverage gate minimum" 's.replace("len(counters) >= 100 and", "len(counters) >= 1000 and")'
       - name: Full build from the archive and an independent recomputation
         env:
           GH_TOKEN: ${{ github.token }}

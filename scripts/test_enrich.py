@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import enrich, tempfile
+import enrich
 
 HOL = os.path.join(HERE, "..", "data", "holidays_jp.csv")
 cal = enrich.calendar(HOL)
@@ -157,4 +157,20 @@ with tempfile.TemporaryDirectory() as tmp:
         raise AssertionError("no station for every counter passed")
     except SystemExit as e:
         assert "got a station" in str(e)
+    # each coverage gate: just above it passes, just below it stops the build on that element
+    # (35.0: 5.6 km from station 1, both stations within 20 km; 35.3: 18.4 km from station 2, no rain within 10 km)
+    def cov(groups):
+        return pd.DataFrame({"latitude": [la for la, n in groups for _ in range(n)], "longitude": 139.0})
+    hw = has.copy()
+    hw.loc[2, "wind_ms"] = False
+    hw.loc[1, "wind_ms"] = True  # wind only at station 1, 27.8 km from 35.3
+    for groups, hh in (([(35.0, 76), (35.3, 24)], has), ([(35.0, 91), (40.0, 9)], has), ([(35.0, 91), (35.3, 9)], hw)):
+        enrich.nearest_stations(cov(groups), st, hh)
+    for groups, hh, which in (([(35.0, 74), (35.3, 26)], has, "precip_mm"), ([(35.0, 89), (40.0, 11)], has, "temp_c"),
+                              ([(35.0, 89), (35.3, 11)], hw, "wind_ms")):
+        try:
+            enrich.nearest_stations(cov(groups), st, hh)
+            raise AssertionError(f"{which} below its gate passed")
+        except SystemExit as e:
+            assert str(e).startswith(which + ":"), e
 print("test_enrich: ALL PASS")
