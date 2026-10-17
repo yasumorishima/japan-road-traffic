@@ -1,0 +1,17 @@
+{
+ "id": "yasunorim/japan-road-traffic-a-forecasting-starter",
+ "title": "Japan Road Traffic: a forecasting starter",
+ "code_file": "japan-road-traffic-forecasting-starter.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": false,
+ "enable_gpu": false,
+ "enable_tpu": false,
+ "enable_internet": false,
+ "dataset_sources": [
+  "yasunorim/japan-road-traffic-volume"
+ ],
+ "competition_sources": [],
+ "kernel_sources": [],
+ "model_sources": []
+}
