@@ -7,7 +7,9 @@ name: Collect police detector counts
 # (police_attempt_YYYYMM_N.json) is left out until those assets are deleted or the month is run by name
 # (see scripts/police/police.py).
 on:
-  # the schedule is switched on once a full official month and a full archive month have run by hand
+  # four times a day, one month each: the whole archive (116 months) takes about a month
+  schedule:
+    - cron: '41 1,7,13,19 * * *'
   workflow_dispatch:
     inputs:
       memo:

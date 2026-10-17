@@ -187,7 +187,7 @@ neighbours add nothing.
 
 ## Police detector counts, from 2017
 
-A second, separate source: JARTIC's 「断面交通量情報」, the counts of the police vehicle detectors on general roads (prefectural police, about 38,600 points in August 2026), every 5 minutes. JARTIC's open-data page keeps only one month (the month two months back, replaced on the 1st). Every month since 2017-01 has been kept by a private archive (compusophia.com), and `.github/workflows/collect-police.yml` takes one month per run from it, at most 10 MB/s, the official month first and then the archive from the newest month back.
+A second, separate source: JARTIC's 「断面交通量情報」, the counts of the police vehicle detectors on general roads (prefectural police, about 38,600 points in August 2026), every 5 minutes. JARTIC's open-data page keeps only one month (the month two months back, replaced on the 1st). Every month since 2017-01 has been kept by a private archive (compusophia.com), and `.github/workflows/collect-police.yml` takes one month per run from it (four runs a day), at most 10 MB/s, the official month first and then the archive from the newest month back.
 
 Each month goes to the release `police-YYYY` as four files:
 
