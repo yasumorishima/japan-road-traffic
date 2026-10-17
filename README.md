@@ -7,7 +7,7 @@ Vehicle counts from the traffic counters of Japan's Ministry of Land, Infrastruc
 
 The source API only keeps **5-minute values for about one month and hourly values for about three months**. Older values are gone from the source, so this archive is the only place they remain.
 
-**Kaggle**: [Japan Road Traffic Volume (Hourly Archive)](https://www.kaggle.com/datasets/yasunorim/japan-road-traffic-volume) (Parquet, updated daily) · notebook: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffic-a-first-look)
+**Kaggle**: [Japan Road Traffic Volume (Hourly Archive)](https://www.kaggle.com/datasets/yasunorim/japan-road-traffic-volume) (Parquet, updated daily) · notebooks: [a first look](https://www.kaggle.com/code/yasunorim/japan-road-traffic-a-first-look), [a forecasting starter](https://www.kaggle.com/code/yasunorim/japan-road-traffic-a-forecasting-starter)
 
 The Kaggle files are ready to use: `vehicles` per row for both kinds of counter (empty for hours a counter flags as faulty), `weekday`, `is_holiday` (Japanese national holidays), and prefecture and municipality names in English as well as Japanese (`prefecture_en`; `municipality_en` in `counters.csv`, e.g. Yokohama-shi Tsurumi-ku).
 
