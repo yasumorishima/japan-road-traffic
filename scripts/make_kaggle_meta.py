@@ -86,9 +86,11 @@ COLS |= {
                      "code in counters.csv municipality_code",
 }
 LOOKBACK = ("on the most recent 4 earlier days of the same day class (the weekday; national holidays count as "
-            "Sunday) within the 35 days before the row's day, at least 3 of them; days in a customary_break and rows "
-            "with an empty vehicles are not used. Only earlier days are read, so it can be used as a forecasting "
-            "feature")
+            "Sunday) within the 35 days before the row's day, at least 3 of them; days in a customary_break, stopped "
+            "days (24 counted hours with fewer than 24 vehicles in all: a stopped camera or counter; stopped in "
+            "daily_summary.csv) and rows with an empty vehicles are not used. A camera or counter that stops for only "
+            "part of a day is not detected and pulls the baseline down, so a very large vs_baseline usually follows "
+            "such a stop. Only earlier days are read, so it can be used as a forecasting feature")
 WX = ("from the counter's nearest AMeDAS station that reports {what} (within {km} km; the station is "
       "{name}_station_id in counters.csv), JMA observations with the normal quality flag only. Weather is archived "
       "from 2026-09-29; earlier rows are empty")
@@ -233,6 +235,43 @@ CENSUS_COLS = {
                                "which can lie partly in a neighbouring municipality"),
 }
 
+DAILY_DESC = ("The small file to start from: one row per counter, sensor and day (JST), summed from the hourly files. "
+              "Day totals are given only when all 24 hours carry the value (see hours); join counters.csv on "
+              "(counter_id, sensor) for the location and census_2021_counters.csv for the route.")
+FULL = " Empty unless all 24 hours of the day carry it"
+DAILY_COLS = {
+    "date": "Day, JST (YYYY-MM-DD); a day runs from 00:00 to 24:00",
+    "counter_id": "Counter ID (常時観測点コード); join with sensor",
+    "sensor": "loop (permanent counter) or cctv (CCTV camera counted by image recognition)",
+    "road_type": "1 = expressway, 3 = national highway",
+    "prefecture_en": "Prefecture in English",
+    "weekday": CALENDAR_COLS["weekday"],
+    "is_holiday": CALENDAR_COLS["is_holiday"],
+    "day_off": CALENDAR_COLS["day_off"],
+    "days_off_in_run": CALENDAR_COLS["days_off_in_run"],
+    "customary_break": CALENDAR_COLS["customary_break"],
+    "hours": ("Number of hours of the day with a vehicle count in both directions (0-24). Below 24 when an hour is "
+              "missing at the source or a permanent counter flags a fault; 0 for a counter whose hours were all flagged "
+              "or empty, and for a counter that counts one direction only (use the hourly up_/down_ columns for it). "
+              "CCTV hours built from incomplete five-minute data (missing_processing in the hourly files) count"),
+    "stopped": ("True when all 24 hours carry a count but the day has fewer vehicles than hours (0 to 23 in all): on "
+                "these roads a stopped camera or counter, not an empty road (most read 0 all day; most are CCTV). "
+                "vehicles, large_vehicles, peak_hour and vs_baseline are then empty, and the hourly baseline does not "
+                "use such days. A stop of only part of a day is not marked"),
+    "vehicles": "Vehicles in the day, both directions." + FULL + "; empty when stopped",
+    "large_vehicles": "Large vehicles in the day, both directions (up_large + down_large)." + FULL + "; empty when stopped",
+    "peak_hour": ("Hour (0-23, the hour starting then) with the most vehicles; the earliest on a tie."
+                  + FULL.replace(" carry it", " carry a count") + "; empty when stopped"),
+    "baseline_vehicles": ("Sum over the day of the hourly baseline (the usual count of the same counter, hour and weekday "
+                          "from earlier days; see baseline_vehicles in the hourly files)." + FULL),
+    "vs_baseline": ("vehicles / baseline_vehicles for the day (1.2 = 20% more than usual); empty when either is empty "
+                    "or the baseline is 0. A camera or counter that stopped for part of the earlier days leaves a small baseline, "
+                    "so a very large value usually follows such a stop rather than heavy traffic"),
+    "precip_mm": "Rain over the day at the counter's nearest AMeDAS station within 10 km, mm." + FULL,
+    "wet_hours": "Hours of the day with at least 1 mm of rain at that station." + FULL.replace(" carry it", " carry a rain value"),
+    "temp_c": "Mean of the 24 hourly temperatures at the nearest AMeDAS station within 20 km, deg C." + FULL,
+}
+
 GRAPH_DESC = ("Road distance between the 365 counters of census_2021_counters.csv on the 2021 Road Traffic Census road "
               "network (all census roads: expressways, national highways, prefectural and designated-city roads, except "
               "sections impassable to vehicles; sections joined where the census describes their ends as the same "
@@ -285,6 +324,9 @@ def main():
             cols = pd.read_csv(p, nrows=0).columns.tolist()
             desc = CENSUS_DESC
             table = CENSUS_COLS
+        elif n == "daily_summary.csv":
+            cols = pd.read_csv(p, nrows=0).columns.tolist()
+            desc, table = DAILY_DESC, DAILY_COLS
         elif n == "road_graph_2021.csv":
             cols = pd.read_csv(p, nrows=0).columns.tolist()
             desc, table = GRAPH_DESC, GRAPH_COLS
@@ -311,7 +353,8 @@ def main():
         resources.append({"path": n, "description": desc,
                           "schema": {"fields": [{"name": c, "description": table[c]} for c in cols]}})
         files[n] = {"description": desc, "columns": {c: table[c] for c in cols}}
-    need = {"counters.csv", "census_2021_counters.csv", "road_graph_2021.csv", "calendar.csv", "weather_stations.csv"}
+    need = {"counters.csv", "census_2021_counters.csv", "road_graph_2021.csv", "calendar.csv", "weather_stations.csv",
+            "daily_summary.csv"}
     if not any(n.startswith("hourly_") for n in files) or not any(n.startswith("weather_hourly_") for n in files) \
             or not need <= set(files):
         sys.exit(f"the build lacks an hourly or weather file or one of {sorted(need)}")

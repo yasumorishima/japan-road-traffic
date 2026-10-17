@@ -78,6 +78,46 @@ ob = base.copy()
 ob.loc[ob.customary_break.notna(), "vehicles"] = 99999
 enrich.baseline(ob, cal, None)
 assert not (ob.baseline_vehicles.dropna() == 99999).any()
+# a stopped day (24 counted hours, fewer than 24 vehicles) is not a baseline day; a short or 24-vehicle day is
+stop = base.copy()
+nd = stop.time_jst.dt.normalize()
+wed = stop.counter_id.eq(1) & nd.dt.dayofweek.eq(2) & ~stop.customary_break.notna().to_numpy()
+stop.loc[wed, "vehicles"] = 0
+enrich.baseline(stop, cal, None)
+assert wed.sum() > 200
+assert not stop.loc[wed].baseline_vehicles.notna().any()  # every Wednesday stopped: no baseline days at all
+
+
+def at9(x):  # counter 1 at 09:00 on day x in the untouched frame
+    return float(base.loc[base.counter_id.eq(1) & nd.eq(pd.Timestamp(x)) & base.time_jst.dt.hour.eq(9), "vehicles"].iloc[0])
+
+
+SKIP = round(float(np.median([at9(x) for x in ("2026-07-08", "2026-07-15", "2026-07-22", "2026-07-29")])), 1)  # 07-08 comes in
+USE = lambda v9: round(float(np.median([at9(x) for x in ("2026-07-15", "2026-07-22", "2026-07-29")] + [v9])), 1)
+for case, hourly, expect in (
+        ("24 hours of 0", lambda h: 0, SKIP),
+        ("23 hours of 0 and one car", lambda h: 1 if h == 14 else 0, SKIP),
+        ("23 vehicles", lambda h: 0 if h == 3 else 1, SKIP),
+        ("24 vehicles, one an hour", lambda h: 1, USE(1)),
+        ("0s with an hour missing", lambda h: "drop" if h == 5 else 0, USE(0)),
+        ("0s with an empty hour", lambda h: None if h == 5 else 0, USE(0)),
+        ("24 hours of 0, another counter on the same sensor", lambda h: 0, SKIP),
+        ("24 hours of 0, the same ID on another sensor", lambda h: 0, SKIP)):
+    p = base.copy()
+    if case.endswith("same sensor"):
+        p.loc[p.counter_id.eq(2), "sensor"] = "loop"     # two loop counters: the stop is per counter
+    if case.endswith("another sensor"):
+        p.loc[p.counter_id.eq(2), "counter_id"] = 1      # counter 1 loop and counter 1 cctv: the stop is per sensor
+    d = p.counter_id.eq(1) & p.sensor.eq("loop") & p.time_jst.dt.normalize().eq(pd.Timestamp("2026-08-05"))  # a Wednesday
+    vals = [hourly(h) for h in p.loc[d].time_jst.dt.hour]
+    p.loc[d, "vehicles"] = pd.array([None if v in (None, "drop") else v for v in vals], "Int32")
+    if "drop" in vals:
+        p = p[~(d & p.time_jst.dt.hour.eq(5))].reset_index(drop=True)
+    enrich.baseline(p, cal, None)
+    q = p.counter_id.eq(1) & p.sensor.eq("loop") & p.time_jst.dt.normalize().eq(pd.Timestamp("2026-08-12")) \
+        & p.time_jst.dt.hour.eq(9)
+    assert q.sum() == 1 and float(p.loc[q, "baseline_vehicles"].iloc[0]) == expect, (case, p.loc[q, "baseline_vehicles"], expect)
+assert SKIP != USE(0) and SKIP != USE(1)
 # carrying the baseline days across chunks gives the result of one chunk
 parts, prev = [], None
 for lo, hi in (("2026-07-01", "2026-07-21"), ("2026-07-21", "2026-08-11"), ("2026-08-11", "2026-09-30")):

@@ -15,7 +15,10 @@ Baseline (two columns on every hourly traffic row)
   baseline_vehicles  median of `vehicles` of the same counter and sensor, at the same time of day, on the most recent
                      NBASE earlier days of the same day class within LOOKBACK days before the row's day (at least
                      MINBASE of them). Day class = the weekday (0 Monday ... 6 Sunday), with national holidays counted
-                     as Sunday. Days in a customary break and rows without `vehicles` are not used as baseline days.
+                     as Sunday. Days in a customary break, days of 24 counted hours with fewer than STOP_BELOW
+                     vehicles (a stopped camera or counter) and rows without `vehicles` are not used as baseline days.
+                     A camera or counter that stops for only part of a day is not detected and pulls its baseline
+                     down.
                      Only days before the row's day are read, so the column can be used as a feature for forecasting.
   vs_baseline        vehicles / baseline_vehicles (empty when either is empty or the baseline is 0)
 
@@ -33,6 +36,10 @@ import pandas as pd
 LOOKBACK = 35
 NBASE = 4
 MINBASE = 3
+# a day of 24 counted hours with fewer vehicles than this is a stopped camera or counter: fewer vehicles than hours.
+# Measured 2026-10-17 on 124,164 full days: the 15 with 1 to 23 vehicles are 0.0001 to 4% of their counter's usual
+# day (or on two cameras that always read 1); the 50 with 24 to 99 mix stops with a counter whose usual day is 67
+STOP_BELOW = 24
 MIN_FILLED = 0.9  # share of weather values the join must find (see add_weather)
 # share of counters that must get a station (measured 2026-10-16: temperature and wind 2063 of 2069, rain 1754)
 MIN_STATION = {"precip_mm": 0.75, "temp_c": 0.9, "wind_ms": 0.9}
@@ -127,7 +134,11 @@ def baseline(df, cal, prev):
                       "cls": np.where(hol, 6, df.time_jst.dt.dayofweek).astype("int8"),
                       "day": (df.time_jst.dt.normalize() - pd.Timestamp("2000-01-01")).dt.days.astype("int32").to_numpy(),
                       "v": df.vehicles.astype("float64").to_numpy(), "row": np.arange(len(df))})
-    src = t.v.notna().to_numpy() & df.customary_break.isna().to_numpy()
+    # a day of 24 counted hours with fewer vehicles than hours is a stopped camera or counter (stopped in
+    # daily_summary.csv): not a baseline day. 24 values mean 24 rows: build_kaggle stops on a repeated (time, counter)
+    gz = t.groupby(["counter_id", "sensor", "day"], sort=False).v
+    stopped = (gz.transform("count").eq(24) & gz.transform("sum").lt(STOP_BELOW)).to_numpy()
+    src = t.v.notna().to_numpy() & df.customary_break.isna().to_numpy() & ~stopped
     days = pd.concat([prev, t.loc[src, KEYS + ["day", "v"]]], ignore_index=True) if prev is not None \
         else t.loc[src, KEYS + ["day", "v"]].reset_index(drop=True)
     days = days.sort_values(KEYS + ["day"], kind="stable").reset_index(drop=True)

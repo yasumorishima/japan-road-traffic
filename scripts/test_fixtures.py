@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory() as tmp:
                     assert pd.isna(row["up_total"])
     assert str(h.up_missing_processing.dtype) == "Int8" and str(m.cam_preset_position.dtype) == "boolean"
     assert len(h) == len(FIX["t_travospublic_measure_1h"]) + len(FIX["t_travospublic_measure_1h_img"])
-    assert sorted(os.listdir(out)) == ["calendar.csv", "census_2021_counters.csv", "counters.csv",
+    assert sorted(os.listdir(out)) == ["calendar.csv", "census_2021_counters.csv", "counters.csv", "daily_summary.csv",
                                        "five_minute_kanto_2026-10_01-10.parquet", "hourly_2026-10_01-10.parquet",
                                        "road_graph_2021.csv", "weather_hourly_2026-10_01-10.parquet", "weather_stations.csv"]
     # ten-day chunks: names do not depend on which days are present yet
@@ -90,7 +90,7 @@ with tempfile.TemporaryDirectory() as tmp:
     r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     md = json.load(open(os.path.join(out, "dataset-metadata.json"), encoding="utf-8"))
-    FILES = ["calendar.csv", "census_2021_counters.csv", "counters.csv", "five_minute_kanto_2026-10_01-10.parquet",
+    FILES = ["calendar.csv", "census_2021_counters.csv", "counters.csv", "daily_summary.csv", "five_minute_kanto_2026-10_01-10.parquet",
              "hourly_2026-10_01-10.parquet", "road_graph_2021.csv", "weather_hourly_2026-10_01-10.parquet",
              "weather_stations.csv"]
     assert sorted(x["path"] for x in md["resources"]) == FILES
@@ -127,7 +127,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert over.sum() <= 0.01 * len(g), over.sum()  # a straight line cannot be much longer than the road
     same = cen.set_index("counter_id").route_ja
     assert (g.same_route == (same.loc[g.counter_a].to_numpy() == same.loc[g.counter_b].to_numpy())).all()
-    for name in ("census_2021_counters.csv", "road_graph_2021.csv"):
+    for name in ("census_2021_counters.csv", "road_graph_2021.csv", "daily_summary.csv"):
         os.rename(os.path.join(out, name), os.path.join(tmp, name))
         r = subprocess.run(meta + [out, "--settings", settings], capture_output=True, text=True)
         assert r.returncode != 0 and name in (r.stderr + r.stdout), (name, r.stderr)
