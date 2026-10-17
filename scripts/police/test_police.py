@@ -251,6 +251,30 @@ def test_more_cleaning_and_points():
         verify_all("2021-03", [p, q], out, tmp, expect=["akita", "toyama"])
 
 
+def test_parsing_parity():
+    """Inputs where a regex and an integer cast could disagree: a sign, full-width digits, a point beyond Int32,
+    one-digit minutes, a short row. The converter and the independent check must read them alike."""
+    tiny()
+    with tempfile.TemporaryDirectory() as tmp:
+        r = base_rows(H10, "3009", F_NEW, year=2021, month=5, points=(1,))
+        r += [row(H10, "2021/05/02 00:00", "3009", 1, "ｘ", "+5"),
+              row(H10, "2021/05/02 00:05", "3009", 1, "ｘ", "５"),
+              row(H10, "2021/05/02 00:10", "3009", "+3", "ｙ", "7"),
+              row(H10, "2021/05/02 00:15", "3009", "2147483648", "ｚ", "7"),
+              row(H10, "2021/05/02 0:5", "3009", 2, "ｗ", "9"),
+              "2021/05/02 00:20,3009,1,ｘ,594031,2,150,6,100"]  # short: no link_version
+        p = os.path.join(tmp, "typeB_akita_2021_05.zip")
+        region_zip(p, [("a.csv", csv_bytes(H10, r))])
+        q = os.path.join(tmp, "typeB_toyama_2021_05.zip")
+        region_zip(q, [("b.csv", csv_bytes(H10, base_rows(H10, "3017", F_NEW, year=2021, month=5)))])
+        man, out = run(tmp, "2021-05", [p, q], check_gates=False)
+        five = pl.read_parquet(os.path.join(out, "police_5min_202105.parquet")).filter(pl.col("time_jst").dt.day() == 2)
+        got = {(x["point"], x["time_jst"].minute): x["vehicles"] for x in five.iter_rows(named=True)}
+        assert got == {(1, 0): 5, (1, 5): None, (3, 10): 7, (2, 5): 9, (1, 20): 6}, got
+        assert man["regions"]["akita"]["point_not_integer"] == 1, man["regions"]["akita"]
+        verify_all("2021-05", [p, q], out, tmp, expect=["akita", "toyama"])
+
+
 def test_lzh_region():
     """A regional archive that is an lzh under a .zip name (2019-06 Hyogo), level 0, 1 and 2 headers."""
     tiny()
@@ -327,6 +351,11 @@ def test_lzh_refused():
             m[0] = size
             open(p, "wb").write((bytes(m) + b"\x00")[:keep])
             raises(lambda: convert.lzh_members(p), ValueError, "bad level-0 header")
+        # a level-1 header three bytes short: it holds the name and CRC but not the OS byte and next size
+        m = bytearray(lzh_member("a.csv", good, level=1))
+        m[0] -= 3
+        open(p, "wb").write(bytes(m) + b"\x00")
+        raises(lambda: convert.lzh_members(p), ValueError, "bad level-1 header")
 
 
 def test_unexpected_members_and_double_region():
@@ -398,6 +427,11 @@ def test_gates():
         early.pop(gone)
         assert convert.gate_failures(y, m, early, tot) == [f"regions missing ['{gone}']"], (y, m)
     assert sizes == {1: 39, 2: 38, 3: 38, 4: 38, 5: 42, 6: 42, 7: 42}, sizes  # as counted in the archive
+    # and the regions themselves, as read from the archive's central directories (survey of 2026-10-17)
+    m9 = {"ehime", "fukuoka", "gifu", "hiroshima", "hyogo", "kagawa", "okayama", "okinawa", "tokushima"}
+    m13 = m9 | {"akita", "saitama", "shimane", "tottori"}
+    assert convert.EARLY_MISSING == {(2017, 1): m13 - {"hiroshima"}, (2017, 2): m13, (2017, 3): m13, (2017, 4): m13,
+                                     (2017, 5): m9, (2017, 6): m9, (2017, 7): m9}, convert.EARLY_MISSING
     assert convert.gate_failures(2016, 12, regions, tot) == ["no region list for 2016-12"]
     assert convert.gate_failures(2017, 7, {**regions, "atlantis": dict(st)}, tot) == ["unknown regions ['atlantis']"]
 
@@ -503,20 +537,22 @@ def full_month(t):
     return {n.format(t=t): {"id": f"{n}{t}", "state": "uploaded", "size": 10} for n in police.KINDS}
 
 
-def drive(gh, argv, official=(2026, 8), fail=None, download_fail=None, listing=None):
+def drive(gh, argv, official=(2026, 8), fail=None, download_fail=None, listing=None, unavailable=None):
     """Run police.main with the network and the converter replaced; returns (exit code, output, months converted)."""
     done, lines = [], []
     police.collect.gh = gh
     police.official_listing = listing or (lambda: (official, ["/x/typeB_akita_2026_08.zip"]))
 
-    def fetch(y, m, om, links, dl):
-        if download_fail and (y, m) == download_fail:
+    # the real fetch_inputs, with HEAD and the transfer replaced
+    def available(url):
+        if unavailable and f"{unavailable[0]:04d}_{unavailable[1]:02d}" in url:
+            raise RuntimeError(f"not available (22): {url}")
+
+    def curl(url, path):
+        if download_fail and f"{download_fail[0]:04d}_{download_fail[1]:02d}" in url:
             raise RuntimeError("download failed (56)")
-        os.makedirs(dl, exist_ok=True)
-        p = os.path.join(dl, "in.zip")
-        open(p, "wb").write(b"x")
-        return [p], {}
-    police.fetch_inputs = fetch
+        open(path, "wb").write(b"x")
+    police.available, police.curl = available, curl
 
     def convert_and_check(ym, paths, sources, work):
         done.append(ym)
@@ -546,7 +582,7 @@ def drive(gh, argv, official=(2026, 8), fail=None, download_fail=None, listing=N
 
 
 def test_police_order_completeness_and_failures():
-    saved = (police.collect.gh, police.official_listing, police.fetch_inputs, police.convert_and_check,
+    saved = (police.collect.gh, police.official_listing, police.available, police.curl, police.convert_and_check,
              police.SKIP_FILE)
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -578,6 +614,11 @@ def test_police_order_completeness_and_failures():
             code, out, done = drive(gh, [])
             assert code == 0 and done == ["2026-07"], (code, done, out)
             assert "2026-08 failed before" in out
+            # a month the server does not answer for (down, or not posted yet) costs no attempt, however often
+            for n in range(4):
+                code, out, done = drive(gh, [], unavailable=(2026, 4))
+                assert str(code).startswith("not available"), (n, code, out)
+            assert not [x for x in gh.rel["police-2026"] if x.startswith("police_attempt_202604")], gh.rel
             # a download that fails (or a run that dies) is tried again, three times in all, then left out
             for n in (1, 2, 3):
                 code, out, done = drive(gh, [], download_fail=(2026, 4))
@@ -624,7 +665,7 @@ def test_police_order_completeness_and_failures():
             open(police.SKIP_FILE, "w").write("2026-05\n")
             raises(police.skipped, SystemExit, "expected")
     finally:
-        (police.collect.gh, police.official_listing, police.fetch_inputs, police.convert_and_check,
+        (police.collect.gh, police.official_listing, police.available, police.curl, police.convert_and_check,
          police.SKIP_FILE) = saved
 
 

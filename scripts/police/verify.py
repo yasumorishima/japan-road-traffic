@@ -18,7 +18,9 @@ from collections import Counter
 from datetime import datetime
 
 REGION_RE = re.compile(r"^typeB_([a-z]+)_(\d{4})_(\d{2})\.zip$")
-TIME_RE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2}) (\d{1,2}):(\d{2})(?::(\d{2}))?$")
+# (ASCII digits only, one or two for the clock fields, as the converter's parser accepts)
+TIME_RE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2}) (\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$", re.ASCII)
+INT_RE = re.compile(r"[+-]?\d+", re.ASCII)  # what an integer cast accepts: a sign and ASCII digits
 CONFLICT = object()
 
 
@@ -150,8 +152,9 @@ def recompute(path, year, month):
             if not line.strip():
                 continue
             c = line.split(",")
-            src, pt, tm, v = (c[i].strip() for i in ix)
-            if not re.fullmatch(r"-?\d+", pt) or int(pt) == 0:
+            # a short row has its missing trailing fields empty, as the converter reads it
+            src, pt, tm, v = (c[i].strip() if i < len(c) else "" for i in ix)
+            if not INT_RE.fullmatch(pt) or not -2**31 <= int(pt) < 2**31 or int(pt) == 0:
                 continue
             m = TIME_RE.match(tm)
             if not m:
@@ -163,7 +166,7 @@ def recompute(path, year, month):
                 continue
             if (Y, M) != (year, month) or mi % 5 or s:
                 continue
-            val = int(v) if re.fullmatch(r"\d+", v) and int(v) <= 32767 else None
+            val = int(v) if INT_RE.fullmatch(v) and 0 <= int(v) <= 32767 else None
             k = (src, int(pt), D, h, mi)
             p = points.get((src, int(pt)))
             if p is None:
@@ -172,7 +175,7 @@ def recompute(path, year, month):
             p["rows"] += 1
             p["first"], p["last"] = min(p["first"], when), max(p["last"], when)
             for a, i in ax.items():
-                x = c[i].strip() if i is not None else ""
+                x = c[i].strip() if i is not None and i < len(c) else ""
                 if x:
                     p[a][x] += 1
             old = keep.get(k, keep)

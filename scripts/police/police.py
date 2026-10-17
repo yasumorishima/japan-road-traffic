@@ -8,14 +8,16 @@ with a speed limit, the official month first, then the archive from the newest m
 A month is complete when its four files are in the release, fully uploaded. It is uploaded only when convert.py's
 gates pass and an independent recomputation of a few regions agrees. When converting or checking a month fails,
 the run uploads police_failed_YYYYMM.json with the reason and stops (red); later runs leave that month out, so a
-broken month is downloaded once and not every six hours. To retry it after a fix, delete that asset. Each run also
-uploads police_attempt_YYYYMM_N.json before it downloads a month, and deletes them when the month is done: a month
-started three times without finishing (a cut download, a killed or timed-out run) is left out the same way. Months
-in data/police_skip.txt (with a reason) are left out as well. --month takes a month whatever happened before.
+broken month is downloaded once and not every six hours. Each run also uploads police_attempt_YYYYMM_N.json once
+every file of a month answers a HEAD request (a server that is down, or a month not posted yet, costs nothing), and
+the marks go when the month is done: a month started three times without finishing (a cut download, a killed or
+timed-out run) is left out the same way. To retry a month left out, delete its police_failed and police_attempt
+assets, or run it by name (--month takes a month whatever happened before). Months in data/police_skip.txt (with a
+reason) are left out as well.
 
 Source: 「断面交通量情報」（公益財団法人日本道路交通情報センター）https://www.jartic.or.jp/service/opendata/
 """
-import argparse, json, os, re, shutil, subprocess, sys, time, urllib.request, zipfile
+import argparse, http.client, json, os, re, shutil, subprocess, sys, time, urllib.request, zipfile
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -84,7 +86,7 @@ def official_listing():
     try:
         with urllib.request.urlopen(OFFICIAL + "/opendata.json", timeout=60) as r:
             listing = json.load(r)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:  # (a cut response is an HTTPException)
         raise ListingUnavailable(str(e)) from e
     e = next(x for x in listing if x["type"] == "typeB")
     m = re.match(r"(\d{4})年(\d{2})月", e["targetMonth"])
@@ -133,11 +135,14 @@ def skipped():
     return out
 
 
-def curl(url, path):
+def available(url):
     head = subprocess.run(["curl", "--fail", "--silent", "--show-error", "--location", "--head", "--max-time", "60",
                            "--retry", "3", "--retry-delay", "30", url], capture_output=True, text=True)
     if head.returncode != 0:
         raise RuntimeError(f"not available ({head.returncode}): {url} {head.stderr.strip()[:200]}")
+
+
+def curl(url, path):
     # -C - continues a cut transfer on each retry instead of starting the file again
     r = subprocess.run(["curl", "--fail", "--silent", "--show-error", "--location", "--retry", "4", "--retry-delay", "60",
                         "--retry-all-errors", "-C", "-", "--limit-rate", RATE, "--max-time", "10800", "-o", path, url])
@@ -147,23 +152,24 @@ def curl(url, path):
         z.infolist()
 
 
-def fetch_inputs(y, m, official_month, official_links, dl):
+def fetch_inputs(y, m, official_month, official_links, dl, started=lambda: None):
+    """Download the month's files. `started` runs once every file has answered a HEAD request, before the first
+    byte is fetched: a server that is down or a month not posted yet is not an attempt at the month."""
     os.makedirs(dl, exist_ok=True)
-    sources = {}
     if (y, m) == official_month:
-        paths = []
-        for link in official_links:
-            p = os.path.join(dl, os.path.basename(link))
-            curl(OFFICIAL + link, p)
-            sources[p] = OFFICIAL + link
-            paths.append(p)
+        urls = [(OFFICIAL + link, os.path.join(dl, os.path.basename(link))) for link in official_links]
+    else:
+        urls = [(ARCHIVE.format(y=y, m=m), os.path.join(dl, f"{y:04d}_{m:02d}.zip"))]
+    for url, _ in urls:
+        available(url)
+    started()
+    sources = {}
+    for url, p in urls:
+        curl(url, p)
+        sources[p] = url
+        if len(urls) > 1:
             time.sleep(2)
-        return paths, sources
-    url = ARCHIVE.format(y=y, m=m)
-    p = os.path.join(dl, f"{y:04d}_{m:02d}.zip")
-    curl(url, p)
-    sources[p] = url
-    return [p], sources
+    return [p for _, p in urls], sources
 
 
 def convert_and_check(ym, paths, sources, work):
@@ -256,10 +262,11 @@ def main():
         shutil.rmtree(work, ignore_errors=True)
         dl = os.path.join(work, "dl")
         t0 = time.time()
-        if not a.no_upload:  # marks the start: a run that dies before the end still counts as an attempt
-            n = len(attempts(ensure_release(tag), y, m)) + 1
-            _note(tag, ATTEMPT_PREFIX.format(t=f"{y:04d}{m:02d}") + f"{n}.json", a.work, month=ym, attempt=n)
-        paths, sources = fetch_inputs(y, m, official_month, official_links, dl)
+        def started():  # marks the start: a run that dies before the end still counts as an attempt
+            if not a.no_upload:
+                n = len(attempts(ensure_release(tag), y, m)) + 1
+                _note(tag, ATTEMPT_PREFIX.format(t=f"{y:04d}{m:02d}") + f"{n}.json", a.work, month=ym, attempt=n)
+        paths, sources = fetch_inputs(y, m, official_month, official_links, dl, started)
         print(f"{ym}: downloaded {sum(os.path.getsize(p) for p in paths) / 1e9:.2f} GB in {time.time() - t0:.0f} s", flush=True)
         try:
             out = convert_and_check(ym, paths, sources, work)
