@@ -3,18 +3,19 @@ into four files:
 
   police_5min_YYYYMM.parquet    source, point, time_jst, vehicles        (every 5-minute value kept)
   police_hourly_YYYYMM.parquet  source, point, hour_jst, vehicles, n_5min (sum over the hour, number of values)
-  police_points_YYYYMM.csv.gz   one row per (source, point): name, mesh, link fields, rows, first/last time
+  police_points_YYYYMM.csv.gz   one row per (source, point): region, name, mesh, link fields, rows, first/last time
   police_manifest_YYYYMM.json   what went in (urls, sha256, members) and every count the gates look at
 
-Input is a list of regional zips (typeB_<region>_YYYY_MM.zip) or monthly archives that contain them.
-Nothing is uploaded here; police.py does that after the gates pass.
+Input is a list of regional archives (typeB_<region>_YYYY_MM.zip, a zip or, once, an lzh under that name) or
+monthly archives that contain them. Regions are read one at a time and lazily, so memory stays near the size of
+the deduplicated 5-minute table of the largest region. Nothing is uploaded here; police.py does that after the
+gates pass.
 
 Source: 「断面交通量情報」（公益財団法人日本道路交通情報センター）https://www.jartic.or.jp/service/opendata/
 """
-import gzip, hashlib, io, json, os, re, shutil, subprocess, sys, zipfile
-from collections import Counter
+import gzip, hashlib, json, os, re, shutil, struct, subprocess, sys, zipfile
+import numpy as np
 import polars as pl
-import pyarrow as pa
 import pyarrow.parquet as pq
 
 # canonical name -> accepted header spellings (the files changed over the years)
@@ -32,16 +33,26 @@ HEADERS = {
 }
 REQUIRED = ["time", "source", "point", "name", "mesh2", "link_kind", "vehicles"]
 OPTIONAL = ["link_no", "link_dist_10m", "link_version"]
+ATTRS = ["name", "mesh2", "link_kind", "link_no", "link_dist_10m", "link_version"]
 TIME_FORMATS = ["%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S"]
 
-# gates: a month that breaks one of these is not published
-MAX_OUTSIDE_SHARE = 0.001   # rows whose time is not a 5-minute mark inside the month
-MAX_CONFLICT_SHARE = 0.001  # (source, point, time) seen twice with different counts
-MAX_BAD_VALUE_SHARE = 0.01  # counts that are not a non-negative integer
-MIN_REGIONS = 30
-MIN_POINTS = 5000
+# The regions of the official page (2026). Every monthly archive from 2017-08 on holds exactly these; the seven
+# months before hold 38 to 42 of them (12 or 13 missing in 2017-01..04, 9 in 2017-05..07).
+REGIONS = frozenset("""aichi akita aomori asahikawa chiba ehime fukui fukuoka fukushima gifu gumma hakodate hiroshima
+hyogo ibaraki ishikawa iwate kagawa kagoshima kanagawa kitami kochi kumamoto kushiro kyoto mie miyagi miyazaki nagano
+nagasaki nara niigata oita okayama okinawa osaka saga saitama sapporo shiga shimane shizuoka tochigi tokushima tokyo
+tottori toyama wakayama yamagata yamaguchi yamanashi""".split())
+ALL_REGIONS_FROM = (2017, 8)
+MIN_REGIONS_BEFORE = 38
 
-FIVE = pl.Schema({"source": pl.String, "point": pl.Int32, "time_jst": pl.Datetime("ms"), "vehicles": pl.Int16})
+# gates, per region (shares of the rows with a usable point number): a month that breaks one is not published
+MAX_OUTSIDE_SHARE = 0.001      # rows whose time is not a 5-minute mark inside the month
+MAX_CONFLICT_SHARE = 0.001     # (source, point, time) seen twice with different counts
+MAX_BAD_VALUE_SHARE = 0.01     # counts that are not an integer 0..32767
+MAX_BAD_POINT_SHARE = 0.001    # point numbers that are not integers
+MIN_POINTS = 5000              # in the whole month
+
+LZH_METHOD = re.compile(rb"-(lh[0-7d]|lz[s45])-$")
 
 
 def sha256(path):
@@ -68,21 +79,125 @@ def is_lzh(path):
     return len(head) >= 7 and head[2:4] == b"-l" and head[6:7] == b"-"
 
 
+def lzh_members(path):
+    """[(name, method, original size)] read from the headers of an LHA archive (levels 0, 1 and 2). Raises on
+    anything else: lha itself accepts garbage silently (it prints nothing and exits 0)."""
+    out = []
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        while True:
+            pos = f.tell()
+            head = f.read(21)
+            # the archive ends with a zero byte (a level-2 header size can also start with one: check the method)
+            if head == b"" or (head[0] == 0 and not LZH_METHOD.match(head[2:7])):
+                if not out:
+                    raise ValueError(f"{path}: no member")
+                return out
+            if len(head) < 21 or not LZH_METHOD.match(head[2:7]):
+                raise ValueError(f"{path}: not an LHA header at {pos}")
+            method = head[2:7].decode()
+            packed, orig = struct.unpack("<II", head[7:15])
+            level = head[20]
+            name = dirname = b""
+            if level in (0, 1):
+                rest = f.read(head[0] + 2 - 21)
+                nlen = rest[0] if rest else 0
+                name = rest[1:1 + nlen]
+                nxt = struct.unpack("<H", rest[-2:])[0] if level == 1 else 0
+                while nxt:
+                    ext = f.read(nxt)
+                    if len(ext) != nxt:
+                        raise ValueError(f"{path}: truncated header at {pos}")
+                    packed -= nxt
+                    if ext[0] == 1:
+                        name = ext[1:-2]
+                    elif ext[0] == 2:
+                        dirname = ext[1:-2]
+                    nxt = struct.unpack("<H", ext[-2:])[0]
+            elif level == 2:
+                hsize = struct.unpack("<H", head[0:2])[0]
+                rest = f.read(hsize - 21)
+                if len(rest) != hsize - 21:
+                    raise ValueError(f"{path}: truncated header at {pos}")
+                nxt, p = struct.unpack("<H", rest[3:5])[0], 5
+                while nxt:
+                    ext = rest[p:p + nxt]
+                    if len(ext) != nxt:
+                        raise ValueError(f"{path}: bad extended header at {pos}")
+                    if ext[0] == 1:
+                        name = ext[1:-2]
+                    elif ext[0] == 2:
+                        dirname = ext[1:-2]
+                    p += nxt
+                    nxt = struct.unpack("<H", ext[-2:])[0]
+            else:
+                raise ValueError(f"{path}: LHA header level {level} at {pos}")
+            full = (dirname.replace(b"\xff", b"/") + name) if dirname else name
+            out.append((full.decode("cp932", "replace"), method, orig))
+            if f.tell() + packed > size:
+                raise ValueError(f"{path}: member {out[-1][0]!r} runs past the end")
+            f.seek(packed, 1)
+
+
+def lha(args, cwd, stdout=None):
+    # lha runs with an empty environment (no token) and only writes to stdout: nothing it reads can name a file
+    return subprocess.run(["lha", *args], cwd=cwd, env={"PATH": "/usr/bin:/bin", "LANG": "C"}, stdout=stdout,
+                          stderr=subprocess.PIPE)
+
+
+def lzh_csvs(path, workdir):
+    """Write the CSV members of an LHA archive to workdir/m{i}.csv (names are never used as paths)."""
+    members = lzh_members(path)
+    files = []
+    for name, method, orig in members:
+        if method == "-lhd-":
+            if "|" in name or orig:
+                raise ValueError(f"{path}: link or odd directory entry {name!r}")
+            continue
+        if not name.lower().endswith(".csv") or "|" in name:
+            raise ValueError(f"{path}: unexpected member {name!r}")
+        files.append((name, orig))
+    r = lha(["tq", os.path.abspath(path)], workdir, stdout=subprocess.DEVNULL)
+    if r.returncode != 0:
+        raise ValueError(f"{path}: lha test failed: {r.stderr.decode(errors='replace')[:200]}")
+    allp = os.path.join(workdir, "lzh.all")
+    with open(allp, "wb") as out:
+        r = lha(["pq", os.path.abspath(path)], workdir, stdout=out)
+    if r.returncode != 0 or os.path.getsize(allp) != sum(o for _, o in files):
+        raise ValueError(f"{path}: lha printed {os.path.getsize(allp)} bytes, headers say {sum(o for _, o in files)}")
+    items = []
+    with open(allp, "rb") as src:  # members come out in archive order, one after another
+        for i, (name, orig) in enumerate(files):
+            p = os.path.join(workdir, f"m{i}.csv")
+            with open(p, "wb") as dst:
+                left = orig
+                while left:
+                    b = src.read(min(left, 1 << 22))
+                    if not b:
+                        raise ValueError(f"{path}: lha output ends inside {name!r}")
+                    dst.write(b)
+                    left -= len(b)
+            items.append((name, p))
+    os.remove(allp)
+    return items
+
+
 def extract_csvs(region_zip, workdir):
-    """Write every CSV of a regional archive to workdir; returns [(name, path, sha256)] with byte-identical
-    copies removed (one archive shipped the same file twice under two names)."""
+    """Write every CSV of a regional archive to workdir; returns ([(name, path, sha256)], dropped) with
+    byte-identical copies removed (one archive shipped the same file twice under two names). A member that is
+    neither a directory nor a CSV stops the month."""
     out, seen = [], {}
     os.makedirs(workdir, exist_ok=True)
     if is_lzh(region_zip):
-        subprocess.run(["lha", "xqw=" + workdir, region_zip], check=True)
-        files = [os.path.join(dp, f) for dp, _, fs in os.walk(workdir) for f in fs if f.lower().endswith(".csv")]
-        items = [(os.path.relpath(p, workdir), p) for p in sorted(files)]
+        items = lzh_csvs(region_zip, workdir)
     else:
         items = []
         with zipfile.ZipFile(region_zip) as z:
             for i, info in enumerate(z.infolist()):
-                if info.is_dir() or not info.filename.lower().endswith(".csv"):
+                if info.is_dir():
                     continue
+                if not info.filename.lower().endswith(".csv"):
+                    raise ValueError(f"{region_zip}: unexpected member {member_name(info)!r}")
                 p = os.path.join(workdir, f"m{i}.csv")
                 with z.open(info) as src, open(p, "wb") as dst:
                     shutil.copyfileobj(src, dst, 1 << 22)
@@ -96,6 +211,8 @@ def extract_csvs(region_zip, workdir):
             continue
         seen[h] = name
         out.append((name, p, h))
+    if not out:
+        raise ValueError(f"{region_zip}: no CSV member")
     return out, dropped
 
 
@@ -108,7 +225,7 @@ def to_utf8(path):
 
 
 def canonical_header(line):
-    cols = [c.strip().lstrip("﻿") for c in line.rstrip("\r\n").split(",")]
+    cols = [c.strip() for c in line.rstrip("\r\n").split(",")]
     names = []
     for c in cols:
         hit = [k for k, v in HEADERS.items() if c in v]
@@ -131,8 +248,8 @@ def parse_time(col):
     return e
 
 
-def read_region(csv_paths):
-    """All rows of one region as a polars frame with canonical columns (strings except time)."""
+def scan_region(csv_paths):
+    """All rows of one region as a lazy frame with canonical columns (strings, plus time_jst)."""
     frames = []
     for p in csv_paths:
         with open(p, encoding="utf-8") as f:
@@ -144,69 +261,100 @@ def read_region(csv_paths):
             if k not in names:
                 lf = lf.with_columns(pl.lit(None, pl.String).alias(k))
         frames.append(lf.select(["time", *REQUIRED[1:], *OPTIONAL]))
-    df = pl.concat(frames).collect()
-    return df.with_columns(parse_time(pl.col("time")).alias("time_jst"))
+    return pl.concat(frames).with_columns(parse_time(pl.col("time")).alias("time_jst"))
 
 
-def mode_nonempty(s):
-    c = Counter(x for x in s if x)
-    return c.most_common(1)[0][0] if c else None
+def collect(lf):
+    return lf.collect(engine="streaming")
 
 
-def convert_region(df, year, month, stats):
+def convert_region(lf, year, month, stats):
     """Returns (five-minute frame, points frame) for one region and fills stats."""
-    n = df.height
-    stats["rows_in"] = n
     start = pl.datetime(year, month, 1, time_unit="ms")
     end = pl.datetime(year + (month == 12), month % 12 + 1, 1, time_unit="ms")
-    point = pl.col("point").cast(pl.Int32, strict=False)
-    df = df.with_columns(point.alias("point_i"))
-    bad_point = df["point_i"].null_count()
-    zero = int((df["point_i"] == 0).sum())
-    df = df.filter(pl.col("point_i").is_not_null() & (pl.col("point_i") != 0))
-    ok_time = (pl.col("time_jst") >= start) & (pl.col("time_jst") < end) & (pl.col("time_jst").dt.minute() % 5 == 0) \
-        & (pl.col("time_jst").dt.second() == 0)
-    outside = int(df.select((~ok_time.fill_null(False)).sum()).item())
-    df = df.filter(ok_time.fill_null(False))
-    v = pl.col("vehicles").cast(pl.Int64, strict=False)
-    df = df.with_columns(v.alias("v"))
-    bad_value = int(df.select((pl.col("v").is_null() | (pl.col("v") < 0) | (pl.col("v") > 32767)).sum()).item())
-    df = df.with_columns(pl.when((pl.col("v") >= 0) & (pl.col("v") <= 32767)).then(pl.col("v")).otherwise(None)
-                         .cast(pl.Int16).alias("v"))
+    lf = lf.with_columns(pl.col("point").cast(pl.Int32, strict=False).alias("point_i"),
+                         pl.col("vehicles").cast(pl.Int64, strict=False).alias("v"))
+    good_point = pl.col("point_i").is_not_null() & (pl.col("point_i") != 0)
+    ok_time = ((pl.col("time_jst") >= start) & (pl.col("time_jst") < end) & (pl.col("time_jst").dt.minute() % 5 == 0)
+               & (pl.col("time_jst").dt.second() == 0)).fill_null(False)
+    ok_v = (pl.col("v") >= 0) & (pl.col("v") <= 32767)
+    c = collect(lf.select(
+        pl.len().alias("rows_in"),
+        pl.col("point_i").is_null().sum().alias("point_not_integer"),
+        (pl.col("point_i") == 0).sum().alias("point_zero_rows"),
+        (good_point & ~ok_time).sum().alias("outside_rows"),
+        (good_point & ok_time & ~ok_v.fill_null(False)).sum().alias("bad_value_rows"))).row(0, named=True)
+    stats.update({k: int(v or 0) for k, v in c.items()})
+    kept = lf.filter(good_point & ok_time)
+    # attributes first, while nothing else is held: the most common non-empty value of each field in the month
+    # (ties: the smallest value); one small count per field (one group_by over all eight strings took far more)
+    attrs = []
+    for a in ATTRS:
+        attrs.append(collect(kept.filter(pl.col(a).is_not_null() & (pl.col(a) != ""))
+                             .group_by("source", "point_i", a).agg(pl.len().alias("n")))
+                     .sort(["source", "point_i", "n", a], descending=[False, False, True, False])
+                     .group_by("source", "point_i", maintain_order=True)
+                     .agg(pl.col(a).first(), pl.col(a).n_unique().cast(pl.Int32).alias("n_" + a)))
+    # one narrow typed table (about 16 bytes a row) holds what the 5-minute values need; the strings stay on disk.
+    # The source code becomes an Enum in sorted order, so sorting by it sorts by the code's text.
+    codes = pl.Enum(sorted(x for x in collect(kept.select(pl.col("source").unique()))["source"] if x is not None))
     key = ["source", "point_i", "time_jst"]
-    g = df.group_by(key).agg(pl.col("v").n_unique().alias("nv"), pl.len().alias("k"), pl.col("v").first().alias("v"))
-    conflicts = g.filter(pl.col("nv") > 1)
-    stats.update(point_not_integer=bad_point, point_zero_rows=zero, outside_rows=outside, bad_value_rows=bad_value,
-                 same_value_duplicates=int(g.filter(pl.col("nv") == 1)["k"].sum() - g.filter(pl.col("nv") == 1).height),
-                 conflict_keys=conflicts.height, conflict_rows=int(conflicts["k"].sum()))
-    five = (g.filter(pl.col("nv") == 1)  # a time with two different counts for one point is dropped, and counted
-            .select(pl.col("source"), pl.col("point_i").alias("point"), pl.col("time_jst"), pl.col("v").alias("vehicles"))
-            .sort("source", "point", "time_jst"))
+    # sort, then cut where the key changes: a hash group_by over every row took 8 to 25 times the table's size
+    s = collect(kept.select(pl.col("source").cast(codes), "point_i", "time_jst",
+                            pl.when(ok_v).then(pl.col("v")).otherwise(None).cast(pl.Int16).alias("v"))
+                ).sort([*key, "v"], nulls_last=False)
+    first, last = run_bounds(s, key)
+    distinct = run_bounds(s, [*key, "v"])[0]  # the start of each distinct (key, value) run
+    nv = pl.Series(np.searchsorted(distinct.to_numpy(), last.to_numpy(), side="right")
+                   - np.searchsorted(distinct.to_numpy(), first.to_numpy(), side="left"))
+    del distinct
+    g = s.select(pl.all().gather(first)).with_columns(nv.alias("nv"), (last - first + 1).cast(pl.Int32).alias("k"))
+    del s, first, last, nv
+    pf, pe = run_bounds(g, ["source", "point_i"])  # g is sorted by point and time
+    kc = g["k"].cast(pl.Int64).cum_sum()
+    per_point = g.select(pl.col("source", "point_i").gather(pf), pl.col("time_jst").gather(pf).alias("first_jst"),
+                         pl.col("time_jst").gather(pe).alias("last_jst")).with_columns(
+        (kc.gather(pe) - kc.gather(pf) + g["k"].cast(pl.Int64).gather(pf)).alias("rows"))
+    del kc
+    d = g.select(single_rows=pl.col("k").filter(pl.col("nv") == 1).sum(), single_keys=(pl.col("nv") == 1).sum(),
+                 conflict_keys=(pl.col("nv") > 1).sum(), conflict_rows=pl.col("k").filter(pl.col("nv") > 1).sum()
+                 ).row(0, named=True)
+    stats.update(same_value_duplicates=int((d["single_rows"] or 0) - d["single_keys"]),
+                 conflict_keys=int(d["conflict_keys"]), conflict_rows=int(d["conflict_rows"] or 0))
+    # a time with two different counts for one point is dropped, and counted
+    # (g follows the sort above, so five comes out sorted by source, point and time)
+    five = g.filter(pl.col("nv") == 1).select(pl.col("source"), pl.col("point_i").alias("point"),
+                                              pl.col("time_jst"), pl.col("v").alias("vehicles"))
+    del g
     stats["rows_out"] = five.height
-    stats["points"] = five.select(pl.struct("source", "point").n_unique()).item() if five.height else 0
-    pts = (df.group_by("source", "point_i").agg(
-        pl.col("name").alias("names"), pl.col("mesh2").alias("meshes"), pl.col("link_kind").alias("kinds"),
-        pl.col("link_no").alias("links"), pl.col("link_dist_10m").alias("dists"), pl.col("link_version").alias("versions"),
-        pl.len().alias("rows"), pl.col("time_jst").min().alias("first_jst"), pl.col("time_jst").max().alias("last_jst"))
-        .sort("source", "point_i"))
-    rows = []
-    for r in pts.iter_rows(named=True):
-        names = Counter(x for x in r["names"] if x)
-        rows.append({
-            "source": r["source"], "point": r["point_i"],
-            "name": names.most_common(1)[0][0] if names else None, "n_names": len(names),
-            "mesh2": mode_nonempty(r["meshes"]), "n_mesh2": len({x for x in r["meshes"] if x}),
-            "link_kind": mode_nonempty(r["kinds"]), "link_no": mode_nonempty(r["links"]),
-            "link_dist_10m": mode_nonempty(r["dists"]), "link_version": mode_nonempty(r["versions"]),
-            "rows": r["rows"], "first_jst": r["first_jst"], "last_jst": r["last_jst"],
-        })
-    points = pl.DataFrame(rows, schema={"source": pl.String, "point": pl.Int32, "name": pl.String, "n_names": pl.Int32,
-                                        "mesh2": pl.String, "n_mesh2": pl.Int32, "link_kind": pl.String,
-                                        "link_no": pl.String, "link_dist_10m": pl.String, "link_version": pl.String,
-                                        "rows": pl.Int64, "first_jst": pl.Datetime("ms"), "last_jst": pl.Datetime("ms")})
+    stats["points"] = run_bounds(five, ["source", "point"])[0].len()
+    five = five.with_columns(pl.col("source").cast(pl.String))
+    per_point = per_point.with_columns(pl.col("source").cast(pl.String))
+    points = per_point
+    for m in attrs:
+        points = points.join(m, on=["source", "point_i"], how="left")
+    points = (points.with_columns(pl.col("n_name").fill_null(0), pl.col("n_mesh2").fill_null(0))
+              .select(pl.col("source"), pl.col("point_i").cast(pl.Int32).alias("point"), "name", "n_name", "mesh2",
+                      "n_mesh2", "link_kind", "link_no", "link_dist_10m", "link_version",
+                      pl.col("rows").cast(pl.Int64), "first_jst", "last_jst")
+              .rename({"n_name": "n_names"})
+              .sort("source", "point"))
     stats["points_several_names"] = int((points["n_names"] > 1).sum())
     stats["points_several_meshes"] = int((points["n_mesh2"] > 1).sum())
     return five, points
+
+
+def run_bounds(df, keys):
+    """First and last row (Int64 Series) of each run of equal keys in a frame sorted by those keys."""
+    if df.height == 0:
+        e = pl.Series([], dtype=pl.Int64)
+        return e, e
+    new = pl.int_range(pl.len()) == 0
+    for k in keys:
+        new = new | pl.col(k).ne_missing(pl.col(k).shift(1))
+    first = df.select(pl.arg_where(new)).to_series().cast(pl.Int64)
+    last = pl.concat([first.slice(1) - 1, pl.Series([df.height - 1], dtype=pl.Int64)])
+    return first, last
 
 
 def hourly_of(five):
@@ -217,31 +365,42 @@ def hourly_of(five):
             .sort("source", "point", "hour_jst"))
 
 
-def regional_zips(paths, workdir):
-    """Expand monthly archives into regional zips; regional zips pass through. Returns [(region, path)]."""
-    out = []
+def region_pattern(year, month):
+    return re.compile(rf"typeB_([a-z]+)_{year:04d}_{month:02d}\.zip$")
+
+
+def regional_zips(paths, workdir, year, month):
+    """Yield (region, path, is_temporary) one region at a time: regional archives pass through, monthly archives
+    are expanded member by member (the caller removes a temporary file after use). Any member of a monthly
+    archive that is not a regional archive of this month stops the month, as does a region given twice."""
+    pat = region_pattern(year, month)
     os.makedirs(workdir, exist_ok=True)
+    seen = set()
+
+    def once(region):
+        if region in seen:
+            raise ValueError(f"region given twice: {region}")
+        seen.add(region)
+
     for p in paths:
-        base = os.path.basename(p)
-        m = re.match(r"typeB_([a-z]+)_\d{4}_\d{2}\.zip$", base)
+        m = pat.match(os.path.basename(p))
         if m:
-            out.append((m.group(1), p))
+            once(m.group(1))
+            yield m.group(1), p, False
             continue
         with zipfile.ZipFile(p) as z:
             for info in z.infolist():
-                n = os.path.basename(member_name(info))
-                m = re.match(r"typeB_([a-z]+)_\d{4}_\d{2}\.zip$", n)
-                if not m:
+                if info.is_dir():
                     continue
+                n = member_name(info)
+                m = pat.match(n)  # no directory part: the name is the whole member name
+                if not m:
+                    raise ValueError(f"{os.path.basename(p)}: unexpected member {n!r}")
+                once(m.group(1))
                 dst = os.path.join(workdir, n)
                 with z.open(info) as src, open(dst, "wb") as f:
                     shutil.copyfileobj(src, f, 1 << 22)
-                out.append((m.group(1), dst))
-    regions = [r for r, _ in out]
-    dup = [r for r, c in Counter(regions).items() if c > 1]
-    if dup:
-        raise ValueError(f"region given twice: {dup}")
-    return sorted(out)
+                yield m.group(1), dst, True
 
 
 def convert_month(ym, inputs, outdir, workdir, sources=None, check_gates=True):
@@ -249,23 +408,23 @@ def convert_month(ym, inputs, outdir, workdir, sources=None, check_gates=True):
     tag = f"{year:04d}{month:02d}"
     os.makedirs(outdir, exist_ok=True)
     manifest = {"month": ym, "inputs": [], "regions": {}, "source_note":
-                "「断面交通量情報」（公益財団法人日本道路交通情報センター）を加工して作成"}
-    for i, p in enumerate(inputs):
+                "「断面交通量情報」（公益財団法人日本道路交通情報センター）（https://www.jartic.or.jp/service/opendata/）を加工して作成"}
+    for p in inputs:
         manifest["inputs"].append({"file": os.path.basename(p), "bytes": os.path.getsize(p), "sha256": sha256(p),
                                    "url": (sources or {}).get(p)})
     five_path = os.path.join(outdir, f"police_5min_{tag}.parquet")
     hour_path = os.path.join(outdir, f"police_hourly_{tag}.parquet")
     w5 = wh = None
     all_points = []
-    for region, rz in regional_zips(inputs, workdir):
-        st = {}
+    for region, rz, temporary in regional_zips(inputs, workdir, year, month):
+        st = {"archive": "lzh" if is_lzh(rz) else "zip"}
         rdir = os.path.join(workdir, "r_" + region)
         members, dropped = extract_csvs(rz, rdir)
+        if temporary:
+            os.remove(rz)
         st["members"] = [m[0] for m in members]
         st["identical_members_dropped"] = dropped
-        df = read_region([to_utf8(m[1]) for m in members])
-        five, points = convert_region(df, year, month, st)
-        del df
+        five, points = convert_region(scan_region([to_utf8(m[1]) for m in members]), year, month, st)
         hourly = hourly_of(five)
         t5, th = five.to_arrow(), hourly.to_arrow()
         if w5 is None:
@@ -274,12 +433,12 @@ def convert_month(ym, inputs, outdir, workdir, sources=None, check_gates=True):
         w5.write_table(t5, row_group_size=2_000_000)
         wh.write_table(th, row_group_size=1_000_000)
         st["hourly_rows"] = hourly.height
+        del five, hourly, t5, th
         all_points.append(points.with_columns(pl.lit(region).alias("region")))
         manifest["regions"][region] = st
         shutil.rmtree(rdir, ignore_errors=True)
-        if rz.startswith(workdir):
-            os.remove(rz)
-        print("region", region, json.dumps(st, ensure_ascii=False, default=str)[:400], flush=True)
+        print("region", region, json.dumps({k: v for k, v in st.items() if k != "members"}, ensure_ascii=False,
+                                           default=str)[:400], flush=True)
     if w5 is None:
         raise ValueError("no region found in the inputs")
     w5.close(); wh.close()
@@ -288,11 +447,13 @@ def convert_month(ym, inputs, outdir, workdir, sources=None, check_gates=True):
     with gzip.open(pts_path, "wb") as f:
         pts.write_csv(f)
     R = manifest["regions"].values()
-    tot = {k: sum(r[k] for r in R) for k in ("rows_in", "rows_out", "points", "point_zero_rows", "outside_rows",
-                                              "bad_value_rows", "conflict_rows", "same_value_duplicates", "hourly_rows")}
+    tot = {k: sum(r[k] for r in R) for k in ("rows_in", "rows_out", "points", "point_not_integer", "point_zero_rows",
+                                              "outside_rows", "bad_value_rows", "conflict_rows",
+                                              "same_value_duplicates", "hourly_rows")}
     tot["regions"] = len(manifest["regions"])
     manifest["totals"] = tot
-    fails = gate_failures(tot)
+    manifest["regions_missing"] = sorted(REGIONS - set(manifest["regions"]))
+    fails = gate_failures(year, month, manifest["regions"], tot)
     manifest["gate_failures"] = fails
     for p in (five_path, hour_path, pts_path):
         manifest.setdefault("outputs", {})[os.path.basename(p)] = {"bytes": os.path.getsize(p), "sha256": sha256(p)}
@@ -305,17 +466,25 @@ def convert_month(ym, inputs, outdir, workdir, sources=None, check_gates=True):
     return manifest
 
 
-def gate_failures(tot):
+def gate_failures(year, month, regions, tot):
     f = []
-    rows = max(tot["rows_in"] - tot["point_zero_rows"], 1)
-    if tot["outside_rows"] / rows > MAX_OUTSIDE_SHARE:
-        f.append(f"outside rows {tot['outside_rows']}")
-    if tot["conflict_rows"] / rows > MAX_CONFLICT_SHARE:
-        f.append(f"conflicting rows {tot['conflict_rows']}")
-    if tot["bad_value_rows"] / rows > MAX_BAD_VALUE_SHARE:
-        f.append(f"bad values {tot['bad_value_rows']}")
-    if tot["regions"] < MIN_REGIONS:
-        f.append(f"regions {tot['regions']}")
+    names = set(regions)
+    if names - REGIONS:
+        f.append(f"unknown regions {sorted(names - REGIONS)}")
+    if (year, month) >= ALL_REGIONS_FROM:
+        if REGIONS - names:
+            f.append(f"regions missing {sorted(REGIONS - names)}")
+    elif len(names) < MIN_REGIONS_BEFORE:
+        f.append(f"regions {len(names)}")
+    for r in sorted(regions):
+        s = regions[r]
+        rows = max(s["rows_in"] - s["point_zero_rows"], 1)
+        for k, lim in (("point_not_integer", MAX_BAD_POINT_SHARE), ("outside_rows", MAX_OUTSIDE_SHARE),
+                       ("conflict_rows", MAX_CONFLICT_SHARE), ("bad_value_rows", MAX_BAD_VALUE_SHARE)):
+            if s[k] / rows > lim:
+                f.append(f"{r} {k} {s[k]}")
+        if s["rows_out"] == 0:
+            f.append(f"{r} no rows")
     if tot["points"] < MIN_POINTS:
         f.append(f"points {tot['points']}")
     return f

@@ -9,7 +9,7 @@ def props(layer, code, cid):
     p.update({"時間コード": int(code), "常時観測点コード": cid, "観測年月日": int(code[:8])})
     return p
 
-def run(source, releases=None, upload_fails=(), upload_broken=(), max_days=100):
+def run(source, releases=None, upload_fails=(), upload_broken=(), upload_unfinished=(), max_days=100):
     """source(layer, road, day) -> set of time codes present, or {code: counters}, or 'fail'.
     Returns (exit code, releases, stdout)."""
     releases = releases if releases is not None else {}
@@ -26,6 +26,9 @@ def run(source, releases=None, upload_fails=(), upload_broken=(), max_days=100):
                 return types.SimpleNamespace(returncode=1, stderr="already exists")
             if name in upload_broken:
                 return types.SimpleNamespace(returncode=1, stderr="HTTP 502")
+            if name in upload_unfinished and "--clobber" not in args:
+                # an earlier cut-off upload left an unfinished asset: not listed, but its name is taken
+                return types.SimpleNamespace(returncode=1, stderr=f"asset under the same name already exists: [{name}]")
             releases[args[2]].add(name); return types.SimpleNamespace(returncode=0, stderr="")
         raise AssertionError(args)
     def get(layer, road, t0, t1, bbox):
@@ -148,4 +151,7 @@ assert f"loop_1h_road3_{D(0)}.csv.gz" not in names(rel) and f"loop_1h_road3_{D(1
 # 10. an upload that really fails makes the run fail
 code, rel, out = run(full, upload_broken={f"loop_1h_road3_{D(2)}.csv.gz"})
 assert code == 1 and f"loop_1h_road3_{D(2)}" in out
+# 11. an unfinished asset of the same name (a cut-off upload) is replaced, not counted as uploaded
+code, rel, out = run(full, upload_unfinished={f"loop_1h_road3_{D(4)}.csv.gz"})
+assert code == 0 and f"loop_1h_road3_{D(4)}.csv.gz" in names(rel), out
 print("test_collect: ALL PASS")

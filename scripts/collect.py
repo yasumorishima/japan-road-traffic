@@ -37,14 +37,15 @@ def gh(*args):
     return subprocess.run(["gh", *args], capture_output=True, text=True)
 
 def release_assets(tag):
-    """All asset names of the release (paginated), or None when the release does not exist."""
+    """Names of the fully uploaded assets of the release (paginated), or None when the release does not exist.
+    An upload cut off midway can leave an asset in state "starter"; it is not counted, so the file is fetched again."""
     r = gh("api", f"repos/{REPO}/releases/tags/{tag}", "--jq", ".id")
     if r.returncode != 0:
         if "Not Found" in r.stderr or "HTTP 404" in r.stderr:
             return None
         raise RuntimeError(f"release {tag}: {r.stderr.strip()}")
     rid = r.stdout.strip()
-    r = gh("api", "--paginate", f"repos/{REPO}/releases/{rid}/assets?per_page=100", "--jq", ".[].name")
+    r = gh("api", "--paginate", f"repos/{REPO}/releases/{rid}/assets?per_page=100", "--jq", '.[] | select(.state == "uploaded") | .name')
     if r.returncode != 0:
         raise RuntimeError(f"assets of {tag}: {r.stderr.strip()}")
     return set(r.stdout.split())
@@ -71,6 +72,10 @@ def upload(tag, path, cache):
     cache[tag] = names
     if name in names:
         print(f"  {name} was already in {tag}"); return True
+    if "already exists" in r.stderr:  # an unfinished asset of that name: replace it
+        r = gh("release", "upload", tag, path, "--repo", REPO, "--clobber")
+        if r.returncode == 0:
+            cache[tag].add(name); return True
     print(f"::warning::upload {name}: {r.stderr.strip()[:300]}")
     return False
 

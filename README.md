@@ -4,6 +4,7 @@ Vehicle counts from the traffic counters of Japan's Ministry of Land, Infrastruc
 
 - **Nationwide, hourly**: permanent counters and AI counters on CCTV images, both directions, small and large vehicles (on 2026-10-05: 993 permanent and 981 CCTV counters on national highways; 76 permanent and 1 CCTV counter on expressways).
 - **Kanto, every 5 minutes**: the same kinds of counters inside the box longitude 138.4–140.95, latitude 34.85–37.2 (Tokyo, Kanagawa, Saitama, Chiba, Ibaraki, Tochigi, Gunma, and the edges of neighbouring prefectures).
+- **Police detectors on general roads, every 5 minutes, from 2017** (a separate source, JARTIC 断面交通量情報, about 38,600 points; location only to a 10 km mesh): see [below](#police-detector-counts-from-2017).
 
 The source API only keeps **5-minute values for about one month and hourly values for about three months**. Older values are gone from the source, so this archive is the only place they remain.
 
@@ -184,6 +185,27 @@ of a counter's own last three hours from 0.0846 to 0.0833 (log `vs_baseline`, 35
 a random counter give 0.0844 (mean of 5 draws): the road graph helps at the short horizon. A day ahead, yesterday's
 neighbours add nothing.
 
+## Police detector counts, from 2017
+
+A second, separate source: JARTIC's 「断面交通量情報」, the counts of the police vehicle detectors on general roads (prefectural police, about 38,600 points in August 2026), every 5 minutes. JARTIC's open-data page keeps only one month (the month two months back, replaced on the 1st). Every month since 2017-01 has been kept by a private archive (compusophia.com), and `.github/workflows/collect-police.yml` takes one month per run from it, at most 10 MB/s, the official month first and then the archive from the newest month back.
+
+Each month goes to the release `police-YYYY` as four files:
+
+| asset | contents |
+|---|---|
+| `police_5min_YYYYMM.parquet` | `source` (情報源コード, the police force), `point` (計測地点番号), `time_jst`, `vehicles` (5-minute count) |
+| `police_hourly_YYYYMM.parquet` | `source`, `point`, `hour_jst`, `vehicles` (sum of the 5-minute counts present), `n_5min` (how many of the 12 were present; `vehicles` is empty when none was) |
+| `police_points_YYYYMM.csv.gz` | one row per point: `region`, `name` (計測地点名称, the most common non-empty name in the month), `mesh2` (2次メッシュコード), link fields (`link_kind`, `link_no`, `link_dist_10m`, `link_version`), `rows`, `first_jst`, `last_jst`, and `n_names` / `n_mesh2` when a point had more than one |
+| `police_manifest_YYYYMM.json` | the input files with sha256 and URL, per-region counts of every row dropped and why, and the gates |
+
+A point is identified by (`source`, `point`); the same number can occur in two forces.
+
+The converter (`scripts/police/convert.py`) reads the three header generations of the source (7 columns in 2017-01, 9 from 2017-08, 10 now), drops point 0 (undefined), rows outside the month or off a 5-minute mark, byte-identical copies of a file (the Tochigi zip of 2026-08 holds the same CSV twice), and a (point, time) given two different counts; repeated identical rows are kept once; counts outside 0–32767 become empty. Each kind of row dropped is counted in the manifest per region. A month is not uploaded when, in any region, more than 0.1% of the rows are outside the month, in conflict or without an integer point number, or more than 1% have a bad count; when a region has no row left; when a region of the official list is missing (from 2017-08; the seven months before hold 38 to 42 regions); when a member of an archive is neither a regional archive of that month nor a CSV; or when the month has fewer than 5,000 points. A few regions of every month (the two smallest, one more chosen by the month, and any lzh archive) are recomputed independently in plain Python (`scripts/police/verify.py`) and must agree with the 5-minute file, the hourly file and the point list row for row. The 2019-06 Hyogo archive is an lzh file under a .zip name; it is read with lhasa after its headers, CRC and sizes are checked, and no name from inside it is used as a path. A month that fails to convert or check leaves `police_failed_YYYYMM.json` (the reason) in its release and later runs leave it out, so it is downloaded once; deleting that asset makes it run again. `data/police_skip.txt` lists months left out on purpose, with the reason. A month counts as complete only when its four files are fully uploaded with the sizes written; an earlier run's partial files are deleted before a month is uploaded again.
+
+**Location: only the name and the 2nd-order mesh (about 10 km square).** JARTIC sells the detector coordinates separately (日本交通管理技術協会, a paid product); this repository does not use them, nor the overview maps, and does not geocode the names. Names follow each force's own style (a route and 上り/下り in some prefectures, an intersection and an inflow direction such as 東入 in others, plain numbers in Tokyo and Osaka).
+
+In August 2026: 322.7 million 5-minute rows (26 GB of CSV) became a 40 MB hourly file; 93.2% of the 5-minute slots of the points present hold a count. 2017-01 has 39 regions.
+
 ## Caveats
 
 - These are counts, not live speeds. Congestion has to be inferred, for example by comparing a count with the same weekday and hour. `data/census_2021_counters.csv` adds a static 2021 travel speed for 365 counters (above).
@@ -211,5 +233,7 @@ Traffic volume data from the MLIT Traffic Volume API (reference values), provide
 Weather: 出典：気象庁ホームページ（https://www.jma.go.jp/bosai/amedas/）のアメダス観測値を加工して作成. Observations from the Japan Meteorological Agency website, used under the JMA website terms (Public Data License 1.0, compatible with CC BY 4.0). Only observations are stored; no forecast or warning is redistributed. This archive is not made or endorsed by JMA.
 
 Road Traffic Census: 出典：「令和3年度全国道路・街路交通情勢調査（道路交通センサス）一般交通量調査 箇所別基本表」（国土交通省）（https://www.mlit.go.jp/road/census/r3/index.html）を加工して作成. Used under the MLIT website terms (Public Data License 1.0, compatible with CC BY 4.0). The tie between counters and census sections is made by this repository, not by MLIT. Observation addresses were located with the GSI address search (国土地理院).
+
+Police detector counts: 出典：「断面交通量情報」（公益財団法人日本道路交通情報センター）（https://www.jartic.or.jp/service/opendata/）を加工して作成. Months no longer on the JARTIC page were taken from the archive at compusophia.com, a copy of the same official files. The JARTIC terms allow commercial use and state compatibility with CC BY 4.0. These files are made by this repository, not by JARTIC or the police.
 
 Code: MIT License.
