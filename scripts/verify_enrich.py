@@ -17,6 +17,11 @@ print(cal.customary_break.value_counts().to_dict())
 
 cn = pd.read_csv(os.path.join(b, "counters.csv"))
 pick = cn.sample(40, random_state=3)[["counter_id", "sensor"]]
+# plus every counter with a stopped day (24 counted hours, fewer than 24 vehicles; 35 through 2026-10-15), so the rule
+# that leaves those days out is checked on each of them
+dd = pd.read_csv(os.path.join(b, "daily_summary.csv"), usecols=["counter_id", "sensor", "stopped"])
+stop = dd[dd.stopped][["counter_id", "sensor"]].drop_duplicates()
+pick = pd.concat([pick, stop]).drop_duplicates()
 cols = ["time_jst", "counter_id", "sensor", "vehicles", "day_off", "days_off_in_run", "customary_break",
         "baseline_vehicles", "vs_baseline", "precip_mm", "temp_c", "wind_ms", "snow_depth_cm"]
 files = sorted(glob.glob(os.path.join(b, "hourly_*.parquet")))
@@ -34,9 +39,23 @@ hol = set(cal.date[cal.is_holiday])
 h["date"] = h.time_jst.dt.normalize()
 h["cls"] = np.where(d.isin(hol), 6, h.time_jst.dt.dayofweek)
 h["hod"] = h.time_jst.dt.hour
-src = h[h.vehicles.notna() & h.customary_break.isna()]
+dk = [h.counter_id, h.sensor, h.date]
+vz = h.vehicles.astype(float)
+stopped = (vz.groupby(dk).transform("size") == 24) & (vz.groupby(dk).transform("count") == 24) & (vz.groupby(dk).transform("sum") < 24)
+src = h[h.vehicles.notna() & h.customary_break.isna() & ~stopped]
 bad = n_has = 0
 sample = h.sample(3000, random_state=1)
+# rows whose baseline days include a stopped day (same counter and day class, within 35 days after it): leaving the
+# stop out moves exactly these. Up to 100 per stopped counter
+sd = h[stopped][["counter_id", "sensor", "date", "cls"]].drop_duplicates()
+after = h.merge(sd.rename(columns={"date": "stop_day"}), on=["counter_id", "sensor", "cls"])
+after = after[(after.date > after.stop_day) & (after.date - after.stop_day <= pd.Timedelta(days=35))]
+after = after.drop(columns="stop_day").drop_duplicates(["time_jst", "counter_id", "sensor"])
+after = after.sample(frac=1, random_state=2).groupby(["counter_id", "sensor"]).head(100)
+print("rows after a stopped day:", len(after), "of", after.groupby(["counter_id", "sensor"]).ngroups, "of", len(stop),
+      "stopped counters")
+assert len(stop) == 0 or len(after) > 0
+sample = pd.concat([sample, after]).drop_duplicates(["time_jst", "counter_id", "sensor"])
 for (cid, sen, hod, cls), g in sample.groupby(["counter_id", "sensor", "hod", "cls"]):
     s = src[(src.counter_id == cid) & (src.sensor == sen) & (src.hod == hod) & (src.cls == cls)].sort_values("date")
     for r in g.itertuples():

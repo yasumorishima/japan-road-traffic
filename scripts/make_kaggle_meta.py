@@ -86,9 +86,11 @@ COLS |= {
                      "code in counters.csv municipality_code",
 }
 LOOKBACK = ("on the most recent 4 earlier days of the same day class (the weekday; national holidays count as "
-            "Sunday) within the 35 days before the row's day, at least 3 of them; days in a customary_break and rows "
-            "with an empty vehicles are not used. Only earlier days are read, so it can be used as a forecasting "
-            "feature")
+            "Sunday) within the 35 days before the row's day, at least 3 of them; days in a customary_break, stopped "
+            "days (24 counted hours with fewer than 24 vehicles in all: a stopped camera or counter; stopped in "
+            "daily_summary.csv) and rows with an empty vehicles are not used. A camera or counter that stops for only "
+            "part of a day is not detected and pulls the baseline down, so a very large vs_baseline usually follows "
+            "such a stop. Only earlier days are read, so it can be used as a forecasting feature")
 WX = ("from the counter's nearest AMeDAS station that reports {what} (within {km} km; the station is "
       "{name}_station_id in counters.csv), JMA observations with the normal quality flag only. Weather is archived "
       "from 2026-09-29; earlier rows are empty")
@@ -252,15 +254,19 @@ DAILY_COLS = {
               "missing at the source or a permanent counter flags a fault; 0 for a counter whose hours were all flagged "
               "or empty, and for a counter that counts one direction only (use the hourly up_/down_ columns for it). "
               "CCTV hours built from incomplete five-minute data (missing_processing in the hourly files) count"),
-    "all_zero": ("True when all 24 hours read 0 vehicles: on these roads a stopped camera or counter, not an empty road "
-                 "(most are CCTV). The day's counts are then left empty"),
-    "vehicles": "Vehicles in the day, both directions." + FULL + "; empty when all_zero",
-    "large_vehicles": "Large vehicles in the day, both directions (up_large + down_large)." + FULL,
-    "peak_hour": "Hour (0-23, the hour starting then) with the most vehicles; the earliest on a tie." + FULL.replace(" carry it", " carry a count"),
+    "stopped": ("True when all 24 hours carry a count but the day has fewer vehicles than hours (0 to 23 in all): on "
+                "these roads a stopped camera or counter, not an empty road (most read 0 all day; most are CCTV). "
+                "vehicles, large_vehicles, peak_hour and vs_baseline are then empty, and the hourly baseline does not "
+                "use such days. A stop of only part of a day is not marked"),
+    "vehicles": "Vehicles in the day, both directions." + FULL + "; empty when stopped",
+    "large_vehicles": "Large vehicles in the day, both directions (up_large + down_large)." + FULL + "; empty when stopped",
+    "peak_hour": ("Hour (0-23, the hour starting then) with the most vehicles; the earliest on a tie."
+                  + FULL.replace(" carry it", " carry a count") + "; empty when stopped"),
     "baseline_vehicles": ("Sum over the day of the hourly baseline (the usual count of the same counter, hour and weekday "
                           "from earlier days; see baseline_vehicles in the hourly files)." + FULL),
     "vs_baseline": ("vehicles / baseline_vehicles for the day (1.2 = 20% more than usual); empty when either is empty "
-                    "or the baseline is 0"),
+                    "or the baseline is 0. A camera or counter that stopped for part of the earlier days leaves a small baseline, "
+                    "so a very large value usually follows such a stop rather than heavy traffic"),
     "precip_mm": "Rain over the day at the counter's nearest AMeDAS station within 10 km, mm." + FULL,
     "wet_hours": "Hours of the day with at least 1 mm of rain at that station." + FULL.replace(" carry it", " carry a rain value"),
     "temp_c": "Mean of the 24 hourly temperatures at the nearest AMeDAS station within 20 km, deg C." + FULL,

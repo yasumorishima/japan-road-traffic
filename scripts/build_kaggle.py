@@ -261,6 +261,8 @@ def main():
                      row_group_size=50_000)
         print(f"weather_hourly_{name}.parquet: {len(g):,} rows, {g.time_jst.dt.date.nunique()} days", flush=True)
     stations.to_csv(os.path.join(a.out, "weather_stations.csv"), index=False, lineterminator="\n")
+    if not days:
+        sys.exit("daily summary: no hourly files were built")
     dd = pd.concat(days, ignore_index=True).sort_values(["date", "counter_id", "sensor"], kind="stable")
     if dd.duplicated(["date", "counter_id", "sensor"]).any():
         sys.exit("daily summary: a (date, counter, sensor) row came from two chunks")

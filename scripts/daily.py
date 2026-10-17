@@ -1,13 +1,18 @@
 """daily_summary.csv: one row per counter, sensor and day (JST) from the hourly files, the small file to start from.
 A day's totals are given only when all 24 hours carry the value (a counter with a missing or flagged hour has
-`hours` < 24 and blank totals), so a total never mixes a short day with a full one. A day whose 24 hours all read
-0 vehicles is marked all_zero and its counts are left blank: on national highways and expressways that is a stopped
-camera or counter (2,137 of 2,237 such days through 2026-10-15 were CCTV), not an empty road. vs_baseline follows the
-hourly rule: empty unless the day's baseline is above 0."""
+`hours` < 24 and blank totals), so a total never mixes a short day with a full one. A day whose 24 hours carry a count
+but add up to fewer vehicles than hours (enrich.STOP_BELOW) is marked stopped and its counts are left blank: on
+national highways and expressways that is a stopped camera or counter, not an empty road (through 2026-10-15: 2,237
+days of 24 zero hours, 2,137 of them CCTV, and 15 days of 1 to 23 vehicles, 13 of them on counters whose usual day is
+hundreds to thousands). The hourly baseline leaves such days out too (enrich.py). vs_baseline follows the hourly
+rule: empty unless the day's baseline is above 0."""
+import os, sys
 import numpy as np, pandas as pd
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from enrich import STOP_BELOW
 
 CAL = ["weekday", "is_holiday", "day_off", "days_off_in_run", "customary_break"]
-COLS = ["date", "counter_id", "sensor", "road_type", "prefecture_en", *CAL, "hours", "all_zero", "vehicles", "large_vehicles",
+COLS = ["date", "counter_id", "sensor", "road_type", "prefecture_en", *CAL, "hours", "stopped", "vehicles", "large_vehicles",
         "peak_hour", "baseline_vehicles", "vs_baseline", "precip_mm", "wet_hours", "temp_c"]
 
 
@@ -30,9 +35,9 @@ def summarise(df):
         raise ValueError(f"more than 24 hourly rows for {n[n > 24].index[0]}")
     full = lambda s: g[s].count().eq(24) & n.eq(24)  # all 24 hours present and carrying the value
     out["hours"] = g.v.count().astype("int8")
-    zero = full("v") & g.v.sum().eq(0)
-    out["all_zero"] = zero.astype(bool)
-    counted = full("v") & ~zero
+    stopped = full("v") & g.v.sum().lt(STOP_BELOW)
+    out["stopped"] = stopped.astype(bool)
+    counted = full("v") & ~stopped
     out["vehicles"] = g.v.sum().where(counted).round().astype("Int32")
     out["large_vehicles"] = g.lg.sum().where(full("lg") & counted).round().astype("Int32")
     peak = d.loc[d.v.notna()].sort_values(["v", "hour"], ascending=[False, True]).groupby(

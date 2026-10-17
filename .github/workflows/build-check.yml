@@ -88,6 +88,13 @@ jobs:
           try "fill gate at its level" 's.replace("np.isfinite(v[inside]).mean() < MIN_FILLED", "np.isfinite(v[inside]).mean() <= MIN_FILLED")'
           try "fill minimum lowered" 's.replace("inside.sum() >= 1000", "inside.sum() >= 999")'
           try "snow in the fill gate" 's.replace("el != \"snow_depth_cm\" and ", "")'
+          try "stopped days used" 's.replace("df.customary_break.isna().to_numpy() & ~stopped", "df.customary_break.isna().to_numpy()")'
+          try "only 24 zero hours are a stop" 's.replace("gz.transform(\"sum\").lt(STOP_BELOW)", "gz.transform(\"sum\").eq(0)")'
+          try "24 vehicles are a stop" 's.replace("gz.transform(\"sum\").lt(STOP_BELOW)", "gz.transform(\"sum\").le(STOP_BELOW)")'
+          try "an empty or missing hour ignored" 's.replace("gz.transform(\"count\").eq(24) & ", "")'
+          try "23 hours are enough" 's.replace("gz.transform(\"count\").eq(24)", "gz.transform(\"count\").ge(23)")'
+          try "stop not per counter" 's.replace("t.groupby([\"counter_id\", \"sensor\", \"day\"]", "t.groupby([\"sensor\", \"day\"]")'
+          try "stop not per sensor" 's.replace("t.groupby([\"counter_id\", \"sensor\", \"day\"]", "t.groupby([\"counter_id\", \"day\"]")'
       - name: Full build from the archive and an independent recomputation
         env:
           GH_TOKEN: ${{ github.token }}

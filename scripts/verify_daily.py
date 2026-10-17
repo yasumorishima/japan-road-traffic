@@ -16,8 +16,11 @@ assert len(k) == len(dd), (len(k), len(dd))
 assert k.merge(dd[["date", "counter_id", "sensor"]], how="outer", indicator=True)._merge.eq("both").all()
 
 assert not np.isinf(dd.vs_baseline).any(), "vs_baseline has inf"
-# 40 random counters plus every counter with an all-zero day or a zero baseline, so those rules are always checked
-odd = dd[dd.all_zero | (dd.baseline_vehicles == 0)][["counter_id", "sensor"]].drop_duplicates()
+# on every row: a day of 24 hours with no total is exactly a stopped day (the totals rule leaves no other case)
+az = (dd.hours == 24) & dd.vehicles.isna()
+assert (dd.stopped == az).all(), dd[dd.stopped != az].head()
+# 40 random counters plus every counter with a stopped day or a zero baseline, so those rules are always checked
+odd = dd[dd.stopped | (dd.baseline_vehicles == 0)][["counter_id", "sensor"]].drop_duplicates()
 pick = pd.concat([dd[["counter_id", "sensor"]].drop_duplicates().sample(40, random_state=11), odd]).drop_duplicates()
 cols = ["time_jst", "counter_id", "sensor", "vehicles", "up_large", "down_large", "baseline_vehicles", "precip_mm",
         "temp_c", "day_off", "days_off_in_run"]
@@ -35,9 +38,9 @@ for key, s in by.items():
     have = [int(x) for x in v if not na(x)]
     assert r.hours == len(have), (key, r.hours, len(have))
     full = len(s) == 24 and len(have) == 24
-    zero = full and sum(have) == 0
-    assert bool(r.all_zero) == zero, (key, r.all_zero)
-    full = full and not zero  # an all-zero day has no counts
+    zero = full and sum(have) < 24  # fewer vehicles than hours: enrich.STOP_BELOW, written out
+    assert bool(r.stopped) == zero, (key, r.stopped)
+    full = full and not zero  # a stopped day has no counts
     exp = sum(have) if full else None
     assert (exp is None and pd.isna(r.vehicles)) or r.vehicles == exp, (key, r.vehicles, exp)
     lg = [None if na(x.vehicles) or na(x.up_large) or na(x.down_large) else int(x.up_large) + int(x.down_large) for x in s]
@@ -65,4 +68,4 @@ for key, s in by.items():
         assert pd.isna(r.temp_c), key
     assert bool(r.day_off) == bool(s[0].day_off) and r.days_off_in_run == s[0].days_off_in_run, key
     n += 1
-print(f"verify_daily: {n} counter-days of {len(pick)} counters (40 sampled + {len(odd)} with all-zero days or a zero baseline) recomputed, all equal")
+print(f"verify_daily: {n} counter-days of {len(pick)} counters (40 sampled + {len(odd)} with stopped days or a zero baseline) recomputed, all equal")
