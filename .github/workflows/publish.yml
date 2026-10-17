@@ -48,7 +48,7 @@ jobs:
 
       - name: Install and test
         run: |
-          pip install --quiet pandas pyarrow kaggle==2.2.4
+          pip install --quiet pandas==3.0.6 pyarrow==26.0.0 numpy==2.5.4 kaggle==2.2.4
           python scripts/test_fetch.py
           python scripts/test_collect.py
           python scripts/test_fixtures.py
@@ -101,7 +101,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pip install --quiet matplotlib pillow
+          pip install --quiet matplotlib==3.11.2 pillow==12.3.0
           d=$(TZ=Asia/Tokyo date +%d)
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ ! -f docs/figures/vs_usual_light.png ] || [[ "$d" =~ ^(01|11|21)$ ]]; then
             python scripts/figures.py _build docs/figures
