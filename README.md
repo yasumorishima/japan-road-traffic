@@ -204,7 +204,9 @@ The converter (`scripts/police/convert.py`) reads the three header generations o
 
 **Location: only the name and the 2nd-order mesh (about 10 km square).** JARTIC sells the detector coordinates separately (日本交通管理技術協会, a paid product); this repository does not use them, nor the overview maps, and does not geocode the names. Names follow each force's own style (a route and 上り/下り in some prefectures, an intersection and an inflow direction such as 東入 in others, plain numbers in Tokyo and Osaka).
 
-In August 2026: 322.7 million 5-minute rows (26 GB of CSV) became a 40 MB hourly file; 93.2% of the 5-minute slots of the points present hold a count. 2017-01 has 39 regions.
+**Status (2026-10-18)**: 2026-07 and 2026-08 are in `police-2026`; the schedule fills the other months from the newest back to 2017-01, about a month for all 116.
+
+In August 2026: 4.2 GB of zip, 321.2 million 5-minute rows from 51 regions and 38,617 points (Tochigi's second copy of the same file and 109,909 rows of point 0 left out), no row dropped by any other rule; the month's files are 322 MB (5-minute), 41 MB (hourly) and 0.7 MB (points); one run takes about 20 minutes and 6.8 GB of memory. 93.2% of the 5-minute slots of the points present hold a count. Point 0 is not always rare: in June 2019 it is 10.2 million of Osaka's 25.1 million rows. 2017-01 has 39 regions.
 
 ## Caveats
 
