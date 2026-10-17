@@ -1,0 +1,3 @@
+# Months the police collector leaves out until someone has looked at them: "YYYY-MM reason".
+# A month whose gates fail stops the run (red); after reading why, add it here with the reason so the
+# collector moves on, and fix the converter or the gate if the data allow it.
