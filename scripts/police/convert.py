@@ -43,7 +43,11 @@ hyogo ibaraki ishikawa iwate kagawa kagoshima kanagawa kitami kochi kumamoto kus
 nagasaki nara niigata oita okayama okinawa osaka saga saitama sapporo shiga shimane shizuoka tochigi tokushima tokyo
 tottori toyama wakayama yamagata yamaguchi yamanashi""".split())
 ALL_REGIONS_FROM = (2017, 8)
-MIN_REGIONS_BEFORE = 38
+# the regions each of the seven earlier archive months lacks (read from the archive's central directories)
+_M13 = frozenset("akita ehime fukuoka gifu hiroshima hyogo kagawa okayama okinawa saitama shimane tokushima tottori".split())
+_M9 = frozenset("ehime fukuoka gifu hiroshima hyogo kagawa okayama okinawa tokushima".split())
+EARLY_MISSING = {(2017, 1): _M13 - {"hiroshima"}, (2017, 2): _M13, (2017, 3): _M13, (2017, 4): _M13,
+                 (2017, 5): _M9, (2017, 6): _M9, (2017, 7): _M9}
 
 # gates, per region (shares of the rows with a usable point number): a month that breaks one is not published
 MAX_OUTSIDE_SHARE = 0.001      # rows whose time is not a 5-minute mark inside the month
@@ -100,7 +104,11 @@ def lzh_members(path):
             level = head[20]
             name = dirname = b""
             if level in (0, 1):
-                rest = f.read(head[0] + 2 - 21)
+                want = head[0] + 2 - 21
+                rest = f.read(want) if want > 0 else b""
+                # name length, name, CRC (and for level 1 the OS byte and the first extended header size)
+                if len(rest) != want or len(rest) < 3 or len(rest) < 3 + rest[0] + 3 * (level == 1):
+                    raise ValueError(f"{path}: bad level-{level} header at {pos}")
                 nlen = rest[0] if rest else 0
                 name = rest[1:1 + nlen]
                 nxt = struct.unpack("<H", rest[-2:])[0] if level == 1 else 0
@@ -257,6 +265,8 @@ def scan_region(csv_paths):
         lf = pl.scan_csv(p, has_header=False, skip_rows=1, new_columns=names, infer_schema=False,
                          truncate_ragged_lines=False, quote_char=None)
         lf = lf.with_columns(pl.col(c).str.strip_chars() for c in names)
+        # an empty source code is read as missing; keep it as "" so it joins and matches like any other code
+        lf = lf.with_columns(pl.col("source").fill_null(""))
         for k in OPTIONAL:
             if k not in names:
                 lf = lf.with_columns(pl.lit(None, pl.String).alias(k))
@@ -471,11 +481,12 @@ def gate_failures(year, month, regions, tot):
     names = set(regions)
     if names - REGIONS:
         f.append(f"unknown regions {sorted(names - REGIONS)}")
-    if (year, month) >= ALL_REGIONS_FROM:
-        if REGIONS - names:
-            f.append(f"regions missing {sorted(REGIONS - names)}")
-    elif len(names) < MIN_REGIONS_BEFORE:
-        f.append(f"regions {len(names)}")
+    # from 2017-08 every region; before, every region the archive holds for that month
+    expected = REGIONS - EARLY_MISSING.get((year, month), frozenset())
+    if (year, month) < ALL_REGIONS_FROM and (year, month) not in EARLY_MISSING:
+        f.append(f"no region list for {year}-{month:02d}")
+    elif expected - names:
+        f.append(f"regions missing {sorted(expected - names)}")
     for r in sorted(regions):
         s = regions[r]
         rows = max(s["rows_in"] - s["point_zero_rows"], 1)

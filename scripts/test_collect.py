@@ -3,6 +3,7 @@ import os, sys, types
 from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(__file__))
 import fetch, collect
+REAL_RELEASE_ASSETS = collect.release_assets  # run() below swaps it for a fake
 
 def props(layer, code, cid):
     p = {c: 0 for c in fetch.SCHEMA[layer]}
@@ -154,4 +155,17 @@ assert code == 1 and f"loop_1h_road3_{D(2)}" in out
 # 11. an unfinished asset of the same name (a cut-off upload) is replaced, not counted as uploaded
 code, rel, out = run(full, upload_unfinished={f"loop_1h_road3_{D(4)}.csv.gz"})
 assert code == 0 and f"loop_1h_road3_{D(4)}.csv.gz" in names(rel), out
+# 12. the release listing counts only fully uploaded assets
+real_gh = collect.gh
+def listing_gh(*args):
+    if args[1].endswith("/releases/tags/raw-202610"):
+        return types.SimpleNamespace(returncode=0, stdout="77\n", stderr="")
+    assert args[:2] == ("api", "--paginate") and "/releases/77/assets" in args[2], args
+    return types.SimpleNamespace(returncode=0, stderr="",
+                                 stdout="loop_1h_road3_20261001.csv.gz\tuploaded\nloop_1h_road3_20261002.csv.gz\tstarter\n")
+collect.gh = listing_gh
+try:
+    assert REAL_RELEASE_ASSETS("raw-202610") == {"loop_1h_road3_20261001.csv.gz"}
+finally:
+    collect.gh = real_gh
 print("test_collect: ALL PASS")

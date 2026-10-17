@@ -8,9 +8,10 @@ with a speed limit, the official month first, then the archive from the newest m
 A month is complete when its four files are in the release, fully uploaded. It is uploaded only when convert.py's
 gates pass and an independent recomputation of a few regions agrees. When converting or checking a month fails,
 the run uploads police_failed_YYYYMM.json with the reason and stops (red); later runs leave that month out, so a
-broken month is downloaded once and not every six hours. To retry it after a fix, delete that asset. Months in
-data/police_skip.txt (with a reason) are left out as well. A failed download leaves no mark: the next run tries
-again.
+broken month is downloaded once and not every six hours. To retry it after a fix, delete that asset. Each run also
+uploads police_attempt_YYYYMM_N.json before it downloads a month, and deletes them when the month is done: a month
+started three times without finishing (a cut download, a killed or timed-out run) is left out the same way. Months
+in data/police_skip.txt (with a reason) are left out as well. --month takes a month whatever happened before.
 
 Source: 「断面交通量情報」（公益財団法人日本道路交通情報センター）https://www.jartic.or.jp/service/opendata/
 """
@@ -28,6 +29,8 @@ FIRST = (2017, 1)
 RATE = os.environ.get("POLICE_RATE", "10M")  # curl --limit-rate in bytes/s: be gentle with both servers
 KINDS = ("police_5min_{t}.parquet", "police_hourly_{t}.parquet", "police_points_{t}.csv.gz", "police_manifest_{t}.json")
 FAILED = "police_failed_{t}.json"
+ATTEMPT_PREFIX = "police_attempt_{t}_"  # + n.json
+MAX_ATTEMPTS = 3  # runs that started a month and never finished it (download cut, killed, timed out)
 SKIP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "police_skip.txt")
 JST = timezone(timedelta(hours=9))
 
@@ -76,8 +79,13 @@ def upload(tag, path):
 
 
 def official_listing():
-    with urllib.request.urlopen(OFFICIAL + "/opendata.json", timeout=60) as r:
-        listing = json.load(r)
+    """(month, links) of the official page. ListingUnavailable when it cannot be read (the archive can still be
+    worked on); any other error (an unexpected format, changed regions) stops the run."""
+    try:
+        with urllib.request.urlopen(OFFICIAL + "/opendata.json", timeout=60) as r:
+            listing = json.load(r)
+    except (OSError, ValueError) as e:
+        raise ListingUnavailable(str(e)) from e
     e = next(x for x in listing if x["type"] == "typeB")
     m = re.match(r"(\d{4})年(\d{2})月", e["targetMonth"])
     if not m:
@@ -168,14 +176,33 @@ def convert_and_check(ym, paths, sources, work):
     return out
 
 
-def mark_failed(tag, y, m, err, work):
-    t = f"{y:04d}{m:02d}"
-    p = os.path.join(work, FAILED.format(t=t))
+def _note(tag, name, work, **fields):
+    os.makedirs(work, exist_ok=True)
+    p = os.path.join(work, name)
     with open(p, "w", encoding="utf-8") as f:
-        json.dump({"month": f"{y:04d}-{m:02d}", "error": err[-2000:], "commit": os.environ.get("GITHUB_SHA"),
-                   "run": os.environ.get("GITHUB_RUN_ID"), "at": datetime.now(JST).isoformat(timespec="seconds"),
-                   "retry": f"delete this asset to try the month again"}, f, ensure_ascii=False, indent=1)
+        json.dump({**fields, "commit": os.environ.get("GITHUB_SHA"), "run": os.environ.get("GITHUB_RUN_ID"),
+                   "at": datetime.now(JST).isoformat(timespec="seconds")}, f, ensure_ascii=False, indent=1)
     upload(tag, p)
+
+
+def mark_failed(tag, y, m, err, work):
+    _note(tag, FAILED.format(t=f"{y:04d}{m:02d}"), work, month=f"{y:04d}-{m:02d}", error=err[-2000:],
+          retry="delete this asset to try the month again")
+
+
+def attempts(have, y, m):
+    """Names of the attempt marks of a month: one is uploaded before each download and all go once it is done."""
+    pre = ATTEMPT_PREFIX.format(t=f"{y:04d}{m:02d}")
+    return sorted(n for n, a in have.items() if n.startswith(pre) and a.get("state") == "uploaded")
+
+
+def fallback_last(now):
+    """The month two before now's month: the official page's month, when its listing cannot be read."""
+    return (now.year, now.month - 2) if now.month > 2 else (now.year - 1, now.month + 10)
+
+
+class ListingUnavailable(Exception):
+    pass
 
 
 def main():
@@ -190,11 +217,10 @@ def main():
         official_month, official_links = official_listing()
         last = official_month
         print("official month", official_month, "regions", len(official_links))
-    except Exception as e:  # the archive can still be worked on
+    except ListingUnavailable as e:  # the archive can still be worked on
         print(f"::warning::official listing: {e}")
         official_month, official_links = None, []
-        now = datetime.now(JST)
-        last = (now.year, now.month - 2) if now.month > 2 else (now.year - 1, now.month + 10)
+        last = fallback_last(datetime.now(JST))
     skip = skipped()
     cache, todo = {}, []
     for y, m in months_until(last):
@@ -206,13 +232,18 @@ def main():
             continue
         tag = f"police-{y:04d}"
         if tag not in cache:
-            cache[tag] = (assets(tag) or {}) if (a.dry_run or a.no_upload) else ensure_release(tag)
+            cache[tag] = assets(tag) or {}  # a release is created only when a month of it is worked on
         have = cache[tag]
         if complete(have, y, m):
             continue
-        if failed(have, y, m) and not a.month:
-            print(f"::warning::{ym} failed before (asset {FAILED.format(t=f'{y:04d}{m:02d}')}); left out")
-            continue
+        if not a.month:  # asked for by name, a month is tried whatever happened before
+            if failed(have, y, m):
+                print(f"::warning::{ym} failed before (asset {FAILED.format(t=f'{y:04d}{m:02d}')}); left out")
+                continue
+            if len(attempts(have, y, m)) >= MAX_ATTEMPTS:
+                print(f"::warning::{ym} was started {len(attempts(have, y, m))} times and never finished; left out "
+                      f"(delete its {ATTEMPT_PREFIX.format(t=f'{y:04d}{m:02d}')}*.json assets to try again)")
+                continue
         todo.append((y, m))
     # newest first: the official month (the newest, and gone from its page next month), then the archive back
     todo.sort(key=lambda t: -(t[0] * 12 + t[1]))
@@ -225,6 +256,9 @@ def main():
         shutil.rmtree(work, ignore_errors=True)
         dl = os.path.join(work, "dl")
         t0 = time.time()
+        if not a.no_upload:  # marks the start: a run that dies before the end still counts as an attempt
+            n = len(attempts(ensure_release(tag), y, m)) + 1
+            _note(tag, ATTEMPT_PREFIX.format(t=f"{y:04d}{m:02d}") + f"{n}.json", a.work, month=ym, attempt=n)
         paths, sources = fetch_inputs(y, m, official_month, official_links, dl)
         print(f"{ym}: downloaded {sum(os.path.getsize(p) for p in paths) / 1e9:.2f} GB in {time.time() - t0:.0f} s", flush=True)
         try:
@@ -239,17 +273,23 @@ def main():
             shutil.rmtree(work, ignore_errors=True)
             continue
         have = assets(tag) or {}
-        for name in [*names_for(y, m), FAILED.format(t=f"{y:04d}{m:02d}")]:  # an earlier run's partial or failed files
+        for name in names_for(y, m):  # an earlier run's partial files
             if name in have:
                 delete_asset(name, have[name])
-        for name in names_for(y, m):  # the manifest goes last
-            upload(tag, os.path.join(out, name))
-        have = assets(tag) or {}
-        for name in names_for(y, m):
-            want = os.path.getsize(os.path.join(out, name))
-            got = have.get(name, {})
-            if got.get("state") != "uploaded" or got.get("size") != want:
-                raise SystemExit(f"{ym}: {name} in {tag} is {got} after upload, expected {want} bytes")
+        # the three data files, checked, then the manifest: a month is complete only once its manifest is there
+        *data, manifest = names_for(y, m)
+        for group in (data, [manifest]):
+            for name in group:
+                upload(tag, os.path.join(out, name))
+            have = assets(tag) or {}
+            for name in group:
+                want = os.path.getsize(os.path.join(out, name))
+                got = have.get(name, {})
+                if got.get("state") != "uploaded" or got.get("size") != want:
+                    raise SystemExit(f"{ym}: {name} in {tag} is {got} after upload, expected {want} bytes")
+        for name in [FAILED.format(t=f"{y:04d}{m:02d}"), *attempts(have, y, m)]:  # the month is done
+            if name in have:
+                delete_asset(name, have[name])
         print(f"{ym}: uploaded to {tag} and checked in {time.time() - t0:.0f} s", flush=True)
         shutil.rmtree(work, ignore_errors=True)
 

@@ -45,10 +45,10 @@ def release_assets(tag):
             return None
         raise RuntimeError(f"release {tag}: {r.stderr.strip()}")
     rid = r.stdout.strip()
-    r = gh("api", "--paginate", f"repos/{REPO}/releases/{rid}/assets?per_page=100", "--jq", '.[] | select(.state == "uploaded") | .name')
+    r = gh("api", "--paginate", f"repos/{REPO}/releases/{rid}/assets?per_page=100", "--jq", '.[] | [.name, .state] | @tsv')
     if r.returncode != 0:
         raise RuntimeError(f"assets of {tag}: {r.stderr.strip()}")
-    return set(r.stdout.split())
+    return {name for name, state in (line.split("\t") for line in r.stdout.splitlines()) if state == "uploaded"}
 
 def ensure_release(tag, cache):
     if tag not in cache:

@@ -67,6 +67,12 @@ def lzh_member(name, data, level=2, method=b"-lh0-", crc=None):
         body = method + struct.pack("<IIIBB", len(data), len(data), 0x5A210000, 0x20, 0) + bytes([len(nb)]) + nb \
             + struct.pack("<H", c)
         return bytes([len(body), sum(body) & 0xFF]) + body + data
+    if level == 1:  # a placeholder name in the base header, the real one in an extended header
+        ext = b"\x01" + nb
+        esize = len(ext) + 2
+        body = method + struct.pack("<IIIBB", len(data) + esize, len(data), 0x5A210000, 0x20, 1) + b"\x01x" \
+            + struct.pack("<H", c) + b"M" + struct.pack("<H", esize)
+        return bytes([len(body), sum(body) & 0xFF]) + body + ext + struct.pack("<H", 0) + data
     exts = [b"\x00" + b"\x00\x00", b"\x01" + nb]  # common header (header crc), file name
     sizes = [len(e) + 2 for e in exts]
     ext_bytes = b"".join(e + struct.pack("<H", sizes[i + 1] if i + 1 < len(exts) else 0) for i, e in enumerate(exts))
@@ -219,14 +225,16 @@ def test_more_cleaning_and_points():
               row(H10, "2021/02/28 23:55", "3009", 5, "Ｒ１３上り　地点5", "8"),
               row(H10, "2021/03/01 03:00", "3009", "A1", "ｘ", "8"),
               row(H10, "2021/03/01 03:15", "3009", 5, "Ｒ１３上り　地点5", "1", mesh="999999"),
-              row(H10, "2021/03/01 03:20", "3009", 5, "別名", "1", mesh="999999")]
+              row(H10, "2021/03/01 03:20", "3009", 5, "別名", "1", mesh="999999"),
+              row(H10, "2021/03/01 24:00", "3009", 5, "Ｒ１３上り　地点5", "1"),        # not a time
+              row(H10, "2021/03/01 00:00", "", 6, "情報源なし", "4")]                   # an empty source code
         p = os.path.join(tmp, "typeB_akita_2021_03.zip")
         region_zip(p, [("a.csv", csv_bytes(H10, r))])
         q = os.path.join(tmp, "typeB_toyama_2021_03.zip")
         region_zip(q, [("b.csv", csv_bytes(H10, base_rows(H10, "3017", F_NEW, year=2021, month=3)))])
         man, out = run(tmp, "2021-03", [p, q], check_gates=False)
         s = man["regions"]["akita"]
-        assert s["bad_value_rows"] == 2 and s["outside_rows"] == 2 and s["point_not_integer"] == 1, s
+        assert s["bad_value_rows"] == 2 and s["outside_rows"] == 3 and s["point_not_integer"] == 1, s
         assert man["totals"]["point_not_integer"] == 1, man["totals"]
         f5 = pl.read_parquet(os.path.join(out, "police_5min_202103.parquet")).filter(pl.col("point") == 4,
                                                                                        pl.col("time_jst").dt.hour() == 3)
@@ -235,14 +243,18 @@ def test_more_cleaning_and_points():
         p5 = pts.filter(pl.col("point") == "5").row(0, named=True)
         assert p5["mesh2"] == "594031" and p5["n_mesh2"] == "2" and p5["n_names"] == "2", p5
         assert p5["name"] == "Ｒ１３上り　地点5" and p5["rows"] == "38", p5
-        assert pts["point"].to_list() == ["4", "5"], pts
+        assert p5["first_jst"].startswith("2021-03-01T00:00") and p5["last_jst"].startswith("2021-03-01T03:20"), p5
+        # the point with an empty source code keeps its attributes
+        p6 = pts.filter(pl.col("point") == "6").row(0, named=True)
+        assert p6["source"] in (None, "") and p6["name"] == "情報源なし" and p6["n_names"] == "1", p6
+        assert pts["point"].to_list() == ["4", "5", "6"], pts  # (sorted by point above)
         verify_all("2021-03", [p, q], out, tmp, expect=["akita", "toyama"])
 
 
 def test_lzh_region():
-    """A regional archive that is an lzh under a .zip name (2019-06 Hyogo), level 0 and level 2 headers."""
+    """A regional archive that is an lzh under a .zip name (2019-06 Hyogo), level 0, 1 and 2 headers."""
     tiny()
-    for level in (0, 2):
+    for level in (0, 1, 2):
         with tempfile.TemporaryDirectory() as tmp:
             rows = base_rows(H10, "3020", F_NEW, year=2019, month=6, points=(1, 2, 3))
             p = os.path.join(tmp, "typeB_hyogo_2019_06.zip")
@@ -308,6 +320,13 @@ def test_lzh_refused():
         with open(p, "wb") as f:
             f.write(b"\x40\x00-lhX-" + b"\x00" * 40)
         raises(lambda: convert.lzh_members(p), ValueError, "not an LHA header")
+        # a level-0 header whose size byte is too small for its own fields, or larger than the file
+        m0 = bytearray(lzh_member("a.csv", good, level=0))
+        for size, keep in ((18, None), (21, None), (200, 40)):  # the last one: a 40-byte file
+            m = bytearray(m0)
+            m[0] = size
+            open(p, "wb").write((bytes(m) + b"\x00")[:keep])
+            raises(lambda: convert.lzh_members(p), ValueError, "bad level-0 header")
 
 
 def test_unexpected_members_and_double_region():
@@ -367,15 +386,20 @@ def test_gates():
     assert convert.gate_failures(2026, 8, {**regions, "akita": {**st, "rows_out": 0}}, tot) == ["akita no rows"]
     assert convert.gate_failures(2026, 8, regions, {"points": 4999}) == ["points 4999"]
     assert convert.gate_failures(2026, 8, regions, {"points": 5000}) == []
-    # from 2017-08 every region must be there; before, at least 38 of them
+    # from 2017-08 every region must be there; before, exactly the regions the archive holds for that month
     less = {r: dict(st) for r in sorted(convert.REGIONS)[:-1]}
     assert convert.gate_failures(2017, 8, less, tot) == [f"regions missing ['{sorted(convert.REGIONS)[-1]}']"]
-    early = {r: dict(st) for r in sorted(convert.REGIONS)[:38]}
-    assert convert.gate_failures(2017, 7, early, tot) == []
-    early.pop(sorted(early)[0])
-    assert convert.gate_failures(2017, 7, early, tot) == ["regions 37"]
-    assert convert.gate_failures(2017, 7, {**early, "atlantis": dict(st), "akita": dict(st)}, tot) == \
-        ["unknown regions ['atlantis']"]
+    sizes = {}
+    for (y, m), miss in convert.EARLY_MISSING.items():
+        early = {r: dict(st) for r in convert.REGIONS - miss}
+        sizes[m] = len(early)
+        assert convert.gate_failures(y, m, early, tot) == [], (y, m)
+        gone = sorted(early)[5]
+        early.pop(gone)
+        assert convert.gate_failures(y, m, early, tot) == [f"regions missing ['{gone}']"], (y, m)
+    assert sizes == {1: 39, 2: 38, 3: 38, 4: 38, 5: 42, 6: 42, 7: 42}, sizes  # as counted in the archive
+    assert convert.gate_failures(2016, 12, regions, tot) == ["no region list for 2016-12"]
+    assert convert.gate_failures(2017, 7, {**regions, "atlantis": dict(st)}, tot) == ["unknown regions ['atlantis']"]
 
 
 def test_verify_catches_changes():
@@ -412,12 +436,23 @@ def test_verify_catches_changes():
         changed(fp, lambda: five.with_columns(pl.when(nth).then(pl.col("time_jst") + pl.duration(days=9))
                                               .otherwise(pl.col("time_jst"))).write_parquet(fp), "5-minute keys differ")
         changed(fp, lambda: pl.concat([five, five.head(1)]).write_parquet(fp), "written twice")
+        changed(fp, lambda: five.filter(~nth).write_parquet(fp), "5-minute keys differ")  # a row lost
+        changed(fp, lambda: pl.concat([five, five.head(1).with_columns(pl.col("time_jst") + pl.duration(days=20))])
+                .write_parquet(fp), "5-minute keys differ")  # a row more
         pts = points_of(out, "202203")
 
         def drop_point():
             with gzip.open(pp, "wb") as f:
                 pts.filter(pl.int_range(pl.len()) != 0).write_csv(f)
         changed(pp, drop_point, "point list differs")
+        for col, val in (("name", "別の名前"), ("mesh2", "000000"), ("link_no", "9"), ("rows", "1"),
+                         ("first_jst", "2022-03-01T00:05:00.000"), ("last_jst", "2022-03-01T00:00:00.000"),
+                         ("n_names", "2"), ("n_mesh2", "0")):
+            def change_attr():
+                with gzip.open(pp, "wb") as f:
+                    pts.with_columns(pl.when(pl.int_range(pl.len()) == 1).then(pl.lit(val)).otherwise(pl.col(col))
+                                     .alias(col)).write_csv(f)
+            changed(pp, change_attr, "point attributes differ")
 
         def drop_region():
             m = json.load(open(mp, encoding="utf-8"))
@@ -468,11 +503,11 @@ def full_month(t):
     return {n.format(t=t): {"id": f"{n}{t}", "state": "uploaded", "size": 10} for n in police.KINDS}
 
 
-def drive(gh, argv, official=(2026, 8), fail=None, download_fail=None):
+def drive(gh, argv, official=(2026, 8), fail=None, download_fail=None, listing=None):
     """Run police.main with the network and the converter replaced; returns (exit code, output, months converted)."""
     done, lines = [], []
     police.collect.gh = gh
-    police.official_listing = lambda: (official, ["/x/typeB_akita_2026_08.zip"])
+    police.official_listing = listing or (lambda: (official, ["/x/typeB_akita_2026_08.zip"]))
 
     def fetch(y, m, om, links, dl):
         if download_fail and (y, m) == download_fail:
@@ -530,8 +565,9 @@ def test_police_order_completeness_and_failures():
             assert code == 0 and done == ["2026-03"], (code, out)
             assert all(a["state"] == "uploaded" and a["id"].isdigit() for n, a in gh.rel["police-2026"].items()
                        if n.endswith("202603.parquet") or "202603" in n), gh.rel["police-2026"]
-            deletes = [c for c in gh.calls if c[:3] == ("api", "-X", "DELETE")]
-            assert len(deletes) == 4, deletes
+            deletes = [c[3].rsplit("/", 1)[1] for c in gh.calls if c[:3] == ("api", "-X", "DELETE")]
+            assert sorted(d for d in deletes if d.endswith("202603")) == sorted(f"{n}202603" for n in police.KINDS), deletes
+            assert not [n for n in gh.rel["police-2026"] if n.startswith("police_attempt_202603")], gh.rel  # done
             # the manifest is uploaded last
             ups = [os.path.basename(c[3]) for c in gh.calls if c[:2] == ("release", "upload")]
             assert ups[-1] == "police_manifest_202603.json", ups
@@ -542,12 +578,24 @@ def test_police_order_completeness_and_failures():
             code, out, done = drive(gh, [])
             assert code == 0 and done == ["2026-07"], (code, done, out)
             assert "2026-08 failed before" in out
-            # a failed download leaves no mark: the month is tried again next time
-            code, out, done = drive(gh, [], download_fail=(2026, 4))
-            assert code == "download failed (56)" and "police_failed_202604.json" not in gh.rel["police-2026"], code
-            # asked for by name, the failed month is tried again, and on success its mark goes
+            # a download that fails (or a run that dies) is tried again, three times in all, then left out
+            for n in (1, 2, 3):
+                code, out, done = drive(gh, [], download_fail=(2026, 4))
+                assert code == "download failed (56)", (n, code, out)
+                assert f"police_attempt_202604_{n}.json" in gh.rel["police-2026"], (n, gh.rel["police-2026"])
+            assert "police_failed_202604.json" not in gh.rel["police-2026"]
+            code, out, done = drive(gh, [])
+            assert code == 0 and done == ["2026-02"], (code, done, out)
+            assert "2026-04 was started 3 times" in out, out
+            # asked for by name, the failed month is tried again, and on success its marks go
+            code, out, done = drive(gh, ["--month", "2026-04"])
+            assert code == 0 and done == ["2026-04"], (code, out)
+            assert not [n for n in gh.rel["police-2026"] if "202604" in n and not n.startswith(("police_5min",
+                        "police_hourly", "police_points", "police_manifest"))], gh.rel["police-2026"]
             code, out, done = drive(gh, ["--month", "2026-08"])
             assert code == 0 and done == ["2026-08"] and "police_failed_202608.json" not in gh.rel["police-2026"], out
+            # releases are made only for a month that is worked on (the listing reads all years)
+            assert set(gh.rel) == {"police-2026"}, sorted(gh.rel)
             # an upload that ends with a wrong size stops the run
             class Short(FakeGitHub):
                 def __call__(self, *args):
@@ -555,8 +603,19 @@ def test_police_order_completeness_and_failures():
                     if args[:2] == ("release", "upload"):
                         self.rel[args[2]][os.path.basename(args[3])]["size"] -= 1
                     return r
-            code, out, done = drive(Short({"police-2026": {}}), ["--month", "2026-08"])
+            short = Short({"police-2026": {}})
+            code, out, done = drive(short, ["--month", "2026-08"])
             assert code and "after upload" in str(code), code
+            assert "police_manifest_202608.json" not in short.rel["police-2026"], "manifest before the data checked"
+            # an official listing that has changed stops the run (only an unreadable one falls back to the archive)
+            def changed_listing():
+                raise RuntimeError("the official regions changed: ['atlantis']")
+            code, out, done = drive(FakeGitHub({}), ["--dry-run"], listing=changed_listing)
+            assert code == "the official regions changed: ['atlantis']", code
+            def unreadable():
+                raise police.ListingUnavailable("timed out")
+            code, out, done = drive(FakeGitHub({}), ["--dry-run"], listing=unreadable)
+            assert code == 0 and "::warning::official listing: timed out" in out, (code, out)
             # --no-upload converts and checks but writes nothing, also on failure
             g2 = FakeGitHub({"police-2026": {}})
             code, out, done = drive(g2, ["--no-upload", "--month", "2026-08"], fail="2026-08")
@@ -567,6 +626,41 @@ def test_police_order_completeness_and_failures():
     finally:
         (police.collect.gh, police.official_listing, police.fetch_inputs, police.convert_and_check,
          police.SKIP_FILE) = saved
+
+
+def test_official_listing():
+    from datetime import datetime
+    assert [police.fallback_last(datetime(2026, m, 15)) for m in (1, 2, 3, 12)] == \
+        [(2025, 11), (2025, 12), (2026, 1), (2026, 10)]
+    real = police.urllib.request.urlopen
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def listing(regions, month="2026年08月"):
+        links = [f"/202610010000/typeB_{r}_2026_08.zip" for r in sorted(regions)]
+        return lambda url, timeout: Resp(json.dumps([{"type": "typeA"}, {"type": "typeB", "targetMonth": month,
+                                                     "targetList": [{"link": l} for l in links]}]).encode())
+    try:
+        police.urllib.request.urlopen = listing(convert.REGIONS)
+        ym, links = police.official_listing()
+        assert ym == (2026, 8) and len(links) == 51, (ym, len(links))
+        # a region more or less is a change the code must follow: it stops the run, it is not a warning
+        police.urllib.request.urlopen = listing(convert.REGIONS - {"akita"})
+        raises(police.official_listing, RuntimeError, "regions changed")
+        police.urllib.request.urlopen = listing(convert.REGIONS, month="2026-08")
+        raises(police.official_listing, RuntimeError, "targetMonth")
+
+        def down(url, timeout):
+            raise police.urllib.error.URLError("timed out")
+        police.urllib.request.urlopen = down
+        raises(police.official_listing, police.ListingUnavailable, "timed out")
+    finally:
+        police.urllib.request.urlopen = real
 
 
 if __name__ == "__main__":
