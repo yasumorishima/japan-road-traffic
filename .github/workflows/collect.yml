@@ -46,7 +46,7 @@ jobs:
 
       - name: Test the fetcher and the collector (offline)
         run: |
-          pip install --quiet pandas pyarrow
+          pip install --quiet pandas==3.0.6 pyarrow==26.0.0 numpy==2.5.4
           python scripts/test_fetch.py
           python scripts/test_collect.py
           python scripts/test_fixtures.py
