@@ -1,0 +1,81 @@
+name: Collect police detector counts
+
+# JARTIC 断面交通量情報 (police vehicle detectors on general roads, 5-minute counts), one month per run into the
+# releases police-YYYY. The official month comes first (the page keeps only one month); then the compusophia.com
+# archive from the newest month back to 2017-01, with a speed limit and one month at a time.
+# A month that fails to convert or check (police_failed_YYYYMM.json) or was started three times without finishing
+# (police_attempt_YYYYMM_N.json) is left out until those assets are deleted or the month is run by name
+# (see scripts/police/police.py).
+on:
+  # the schedule is switched on once a full official month and a full archive month have run by hand
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: 'Why this run'
+        required: true
+        type: string
+      month:
+        description: 'YYYY-MM: only this month (empty: the next missing month)'
+        required: false
+        default: ''
+        type: string
+      max_months:
+        description: 'Months in this run'
+        required: false
+        default: '1'
+        type: string
+      dry_run:
+        description: 'Only list missing months'
+        required: false
+        default: false
+        type: boolean
+      no_upload:
+        description: 'Download, convert and check, but upload nothing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-police
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Tests (offline)
+        run: |
+          sudo apt-get update -q > /dev/null
+          sudo apt-get install -y -q lhasa > /dev/null
+          pip install --quiet polars==1.34.0 pyarrow==21.0.0 pandas==2.3.3 numpy==2.4.6
+          cd scripts/police && python test_police.py
+
+      - name: Fetch, convert, check and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORK: /mnt/police
+          MONTH: ${{ inputs.month }}
+          MAX_MONTHS: ${{ inputs.max_months || '1' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          NO_UPLOAD: ${{ inputs.no_upload }}
+        run: |
+          sudo mkdir -p /mnt/police && sudo chown "$USER" /mnt/police
+          df -h /mnt | tail -1; free -g | head -2
+          args=(--max-months "$MAX_MONTHS")
+          if [ -n "$MONTH" ]; then args+=(--month "$MONTH"); fi
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          if [ "$NO_UPLOAD" = "true" ]; then args+=(--no-upload); fi
+          /usr/bin/time -v python scripts/police/police.py "${args[@]}" 2> >(tee time.txt >&2)
+          grep -E "Maximum resident|Elapsed" time.txt || true

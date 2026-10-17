@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Planted defects in scripts/daily.py: each must make scripts/test_daily.py fail. Run from the repo root with PY set.
 set -u
+# no bytecode cache: a quick test run can otherwise import the previous mutation's cached bytecode
+export PYTHONDONTWRITEBYTECODE=1
+rm -rf scripts/__pycache__
 PY=${PY:-python}
 tmp=$(mktemp -d)
 cp scripts/daily.py "$tmp/daily.keep"

@@ -3,13 +3,14 @@ import os, sys, types
 from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(__file__))
 import fetch, collect
+REAL_RELEASE_ASSETS = collect.release_assets  # run() below swaps it for a fake
 
 def props(layer, code, cid):
     p = {c: 0 for c in fetch.SCHEMA[layer]}
     p.update({"時間コード": int(code), "常時観測点コード": cid, "観測年月日": int(code[:8])})
     return p
 
-def run(source, releases=None, upload_fails=(), upload_broken=(), max_days=100):
+def run(source, releases=None, upload_fails=(), upload_broken=(), upload_unfinished=(), max_days=100):
     """source(layer, road, day) -> set of time codes present, or {code: counters}, or 'fail'.
     Returns (exit code, releases, stdout)."""
     releases = releases if releases is not None else {}
@@ -26,6 +27,9 @@ def run(source, releases=None, upload_fails=(), upload_broken=(), max_days=100):
                 return types.SimpleNamespace(returncode=1, stderr="already exists")
             if name in upload_broken:
                 return types.SimpleNamespace(returncode=1, stderr="HTTP 502")
+            if name in upload_unfinished and "--clobber" not in args:
+                # an earlier cut-off upload left an unfinished asset: not listed, but its name is taken
+                return types.SimpleNamespace(returncode=1, stderr=f"asset under the same name already exists: [{name}]")
             releases[args[2]].add(name); return types.SimpleNamespace(returncode=0, stderr="")
         raise AssertionError(args)
     def get(layer, road, t0, t1, bbox):
@@ -148,4 +152,20 @@ assert f"loop_1h_road3_{D(0)}.csv.gz" not in names(rel) and f"loop_1h_road3_{D(1
 # 10. an upload that really fails makes the run fail
 code, rel, out = run(full, upload_broken={f"loop_1h_road3_{D(2)}.csv.gz"})
 assert code == 1 and f"loop_1h_road3_{D(2)}" in out
+# 11. an unfinished asset of the same name (a cut-off upload) is replaced, not counted as uploaded
+code, rel, out = run(full, upload_unfinished={f"loop_1h_road3_{D(4)}.csv.gz"})
+assert code == 0 and f"loop_1h_road3_{D(4)}.csv.gz" in names(rel), out
+# 12. the release listing counts only fully uploaded assets
+real_gh = collect.gh
+def listing_gh(*args):
+    if args[1].endswith("/releases/tags/raw-202610"):
+        return types.SimpleNamespace(returncode=0, stdout="77\n", stderr="")
+    assert args[:2] == ("api", "--paginate") and "/releases/77/assets" in args[2], args
+    return types.SimpleNamespace(returncode=0, stderr="",
+                                 stdout="loop_1h_road3_20261001.csv.gz\tuploaded\nloop_1h_road3_20261002.csv.gz\tstarter\n")
+collect.gh = listing_gh
+try:
+    assert REAL_RELEASE_ASSETS("raw-202610") == {"loop_1h_road3_20261001.csv.gz"}
+finally:
+    collect.gh = real_gh
 print("test_collect: ALL PASS")
