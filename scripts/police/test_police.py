@@ -320,6 +320,11 @@ def test_nested_region_zip():
                 for n in wrapped:
                     z.writestr(n, inner.getvalue())
             raises(lambda: run(tmp, "2023-06", [p, q], check_gates=False), ValueError, "unexpected member")
+            chk = os.path.join(tmp, "chk")
+            shutil.rmtree(chk, ignore_errors=True)
+            verify.pick([p, q], chk, "2023-06")
+            with zipfile.ZipFile(os.path.join(chk, "akita.arc")) as z:  # the check does not unwrap it either
+                assert z.namelist() == wrapped, z.namelist()
 
 
 def test_lzh_refused():
