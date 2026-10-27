@@ -190,12 +190,26 @@ def lzh_csvs(path, workdir):
     return items
 
 
-def extract_csvs(region_zip, workdir):
+def extract_csvs(region_zip, workdir, nested=False):
     """Write every CSV of a regional archive to workdir; returns ([(name, path, sha256)], dropped) with
     byte-identical copies removed (one archive shipped the same file twice under two names). A member that is
-    neither a directory nor a CSV stops the month."""
+    neither a directory nor a CSV stops the month. A regional zip whose only file is the same regional archive
+    again (2023-06 Akita: typeB_akita_2023_06/typeB_akita_2023_06.zip) is opened one level down, once."""
     out, seen = [], {}
     os.makedirs(workdir, exist_ok=True)
+    if not nested and not is_lzh(region_zip):
+        with zipfile.ZipFile(region_zip) as z:
+            files = [i for i in z.infolist() if not i.is_dir()]
+            wrapped = len(files) == 1 and member_name(files[0]).rsplit("/", 1)[-1] == os.path.basename(region_zip)
+            if wrapped:
+                inner = os.path.join(workdir, "inner.arc")  # never a name taken from the archive
+                with z.open(files[0]) as src, open(inner, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 22)
+        if wrapped:
+            try:
+                return extract_csvs(inner, workdir, nested=True)
+            finally:
+                os.remove(inner)
     if is_lzh(region_zip):
         items = lzh_csvs(region_zip, workdir)
     else:

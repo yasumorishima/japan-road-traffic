@@ -1,0 +1,3 @@
+# Months the police collector tries again although they failed before (their police_failed asset is ignored; the
+# limit of three started attempts still holds): "YYYY-MM reason". Remove a line once its month is in the release.
+2023-06 Akita's regional zip holds the same zip one level down; the converter now opens it

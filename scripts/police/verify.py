@@ -95,7 +95,25 @@ def pick(paths, chk, ym):
         else:
             with zipfile.ZipFile(src[1]) as z, z.open(src[2]) as f, open(dst, "wb") as out:
                 shutil.copyfileobj(f, out, 1 << 22)
+        _unwrap(dst, region, year, month)
     return sorted(chosen), sorted(f[1] for f in found)
+
+
+def _unwrap(path, region, year, month):
+    """A regional zip whose only file is the same regional archive again is replaced by that archive (once)."""
+    with open(path, "rb") as f:
+        if _kind(f.read(8)) != "zip":
+            return
+    with zipfile.ZipFile(path) as z:
+        files = [i for i in z.infolist() if not i.is_dir()]
+        if len(files) != 1:
+            return
+        m = REGION_RE.match(_name(files[0]).rsplit("/", 1)[-1])
+        if not m or (m.group(1), int(m.group(2)), int(m.group(3))) != (region, year, month):
+            return
+        with z.open(files[0]) as f, open(path + ".inner", "wb") as out:
+            shutil.copyfileobj(f, out, 1 << 22)
+    os.replace(path + ".inner", path)
 
 
 def texts(path):
