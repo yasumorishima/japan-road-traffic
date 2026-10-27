@@ -142,7 +142,9 @@ jobs:
         run: |
           set -o pipefail
           last=$(grep -oE '_[0-9]{8}\.csv\.gz' assets.txt | tr -dc '0-9\n' | sort | tail -1)
-          if prev=$(kaggle datasets status --format 'json(current_version_number)' "$DATASET" 2>/dev/null | jq -er .current_version_number); then
+          # the CLI can print notices (e.g. "a newer kaggle version exists") on stdout before the JSON: keep only the JSON
+          status_json() { kaggle datasets status --format "json($1)" "$DATASET" 2>/dev/null | grep -o '{.*}' | tail -1; }
+          if prev=$(status_json current_version_number | jq -er .current_version_number); then
             kaggle datasets version -p _build -m "Archive through ${last}" 2>&1 | tee kaggle.log
           else
             # a dataset that exists but could not be read is refused by create ("already in use")
@@ -154,7 +156,7 @@ jobs:
           if grep -qiE "error|unsuccessful|forbidden|not valid" kaggle.log; then exit 1; fi
           # record the archive as published only once Kaggle has finished processing the new version
           for i in $(seq 1 60); do
-            js=$(kaggle datasets status --format 'json(status,current_version_number)' "$DATASET" 2>/dev/null || true)
+            js=$(status_json status,current_version_number || true)
             echo "status: $js (before upload: version $prev)"
             ok=$(echo "$js" | jq -r --argjson p "$prev" 'select(.status == "ready" and .current_version_number > $p) | "ok"' 2>/dev/null || true)
             if [ "$ok" = ok ]; then break; fi
