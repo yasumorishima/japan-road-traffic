@@ -296,35 +296,54 @@ def test_lzh_region():
 
 
 def test_nested_region_zip():
-    """A regional zip whose only file is the same regional zip one folder down (2023-06 Akita) is read through,
-    by the converter and by the independent check; anything else wrapped that way still stops the month."""
+    """2023-06 Akita: the regional zip holds a folder with the CSV and, next to it, a zip of that same folder. The
+    CSVs of a zip with the archive's own name are read too (one level down), by the converter and by the
+    independent check; a byte-identical copy counts once. Anything else inside still stops the month."""
     tiny()
     with tempfile.TemporaryDirectory() as tmp:
-        rows = base_rows(H10, "3009", F_NEW, year=2023, month=6, points=(1, 2, 3))
-        inner = io.BytesIO()
-        region_zip(inner, [("a.csv", csv_bytes(H10, rows))])
+        good = csv_bytes(H10, base_rows(H10, "3009", F_NEW, year=2023, month=6, points=(1, 2, 3)))
+        more = csv_bytes(H10, base_rows(H10, "3009", F_NEW, year=2023, month=6, points=(4,)))
+        def inner(members):
+            b = io.BytesIO()
+            with zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("typeB_akita_2023_06/", b"")
+                for n, d in members:
+                    z.writestr(n, d)
+            return b.getvalue()
         p = os.path.join(tmp, "typeB_akita_2023_06.zip")
-        with zipfile.ZipFile(p, "w") as z:
-            z.writestr("typeB_akita_2023_06/", b"")
-            z.writestr("typeB_akita_2023_06/typeB_akita_2023_06.zip", inner.getvalue())
+        def outer(members):
+            with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("typeB_akita_2023_06/", b"")
+                for n, d in members:
+                    z.writestr(n, d)
         q = os.path.join(tmp, "typeB_toyama_2023_06.zip")
         region_zip(q, [("b.csv", csv_bytes(H10, base_rows(H10, "3017", F_NEW, year=2023, month=6)))])
+        csv = "typeB_akita_2023_06/秋田県警_202306.csv"
+        own = "typeB_akita_2023_06/typeB_akita_2023_06.zip"
+        # as shipped: the same CSV twice, once inside the inner zip
+        outer([(own, inner([(csv, good)])), (csv, good)])
         man, out = run(tmp, "2023-06", [p, q], check_gates=False)
-        assert man["regions"]["akita"]["rows_out"] == 108 and man["regions"]["akita"]["members"] == ["a.csv"], man
-        regs = verify_all("2023-06", [p, q], out, tmp)
-        assert "akita" in regs, regs
-        # a zip of another region (or month) inside, or a second file next to it, is not unwrapped
-        for wrapped in (["typeB_akita_2023_06/typeB_aomori_2023_06.zip"],
-                        ["typeB_akita_2023_06/typeB_akita_2023_06.zip", "readme.txt"]):
-            with zipfile.ZipFile(p, "w") as z:
-                for n in wrapped:
-                    z.writestr(n, inner.getvalue())
+        st = man["regions"]["akita"]
+        assert st["rows_out"] == 108 and len(st["identical_members_dropped"]) == 1, st
+        assert "akita" in verify_all("2023-06", [p, q], out, tmp)
+        # an inner zip with other rows: both are read, by both sides
+        outer([(csv, good), (own, inner([("typeB_akita_2023_06/more.csv", more)]))])
+        man, out = run(tmp, "2023-06", [p, q], check_gates=False)
+        assert man["regions"]["akita"]["rows_out"] == 144, man["regions"]["akita"]
+        assert "akita" in verify_all("2023-06", [p, q], out, tmp)
+        # the check reads the inner rows too: dropping them from the output is caught
+        five = pl.read_parquet(os.path.join(out, "police_5min_202306.parquet"))
+        five.filter(pl.col("point") != 4).write_parquet(os.path.join(out, "police_5min_202306.parquet"))
+        raises(lambda: verify_all("2023-06", [p, q], out, tmp), SystemExit, "")
+        # another region's zip, a zip two levels down, or another file still stop the month
+        for bad in ([(csv, good), ("typeB_akita_2023_06/typeB_aomori_2023_06.zip", inner([(csv, good)]))],
+                    [(csv, good), (own, inner([(own, inner([(csv, good)]))]))],
+                    [(csv, good), ("typeB_akita_2023_06/readme.txt", b"x")]):
+            outer(bad)
             raises(lambda: run(tmp, "2023-06", [p, q], check_gates=False), ValueError, "unexpected member")
-            chk = os.path.join(tmp, "chk")
-            shutil.rmtree(chk, ignore_errors=True)
-            verify.pick([p, q], chk, "2023-06")
-            with zipfile.ZipFile(os.path.join(chk, "akita.arc")) as z:  # the check does not unwrap it either
-                assert z.namelist() == wrapped, z.namelist()
+        # the check never reads another region's zip
+        outer([(csv, good), ("typeB_akita_2023_06/typeB_aomori_2023_06.zip", inner([("x/more.csv", more)]))])
+        assert len(list(verify.texts(p, 2023, 6))) == 1
 
 
 def test_lzh_refused():
