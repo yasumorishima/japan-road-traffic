@@ -13,7 +13,8 @@ every file of a month answers a HEAD request (a server that is down, or a month 
 the marks go when the month is done: a month started three times without finishing (a cut download, a killed or
 timed-out run) is left out the same way. To retry a month left out, delete its police_failed and police_attempt
 assets, or run it by name (--month takes a month whatever happened before). Months in data/police_skip.txt (with a
-reason) are left out as well.
+reason) are left out as well. Months in data/police_retry.txt (with a reason) are tried again although they failed
+before (the attempt limit still holds), for a fix that only a push can deliver; remove a line once its month is in.
 
 Source: 「断面交通量情報」（公益財団法人日本道路交通情報センター）https://www.jartic.or.jp/service/opendata/
 """
@@ -34,6 +35,7 @@ FAILED = "police_failed_{t}.json"
 ATTEMPT_PREFIX = "police_attempt_{t}_"  # + n.json
 MAX_ATTEMPTS = 3  # runs that started a month and never finished it (download cut, killed, timed out)
 SKIP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "police_skip.txt")
+RETRY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "police_retry.txt")
 JST = timezone(timedelta(hours=9))
 
 
@@ -122,15 +124,24 @@ def failed(have, y, m):
 
 
 def skipped():
+    return month_list(SKIP_FILE)
+
+
+def retried():
+    return month_list(RETRY_FILE)
+
+
+def month_list(path):
+    """{"YYYY-MM": reason} from a file of 'YYYY-MM reason' lines (# starts a comment)."""
     out = {}
-    if os.path.exists(SKIP_FILE):
-        for line in open(SKIP_FILE, encoding="utf-8"):
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
             line = line.split("#", 1)[0].strip()
             if not line:
                 continue
             ym, _, why = line.partition(" ")
             if not re.fullmatch(r"\d{4}-\d{2}", ym) or not why.strip():
-                raise SystemExit(f"{SKIP_FILE}: expected 'YYYY-MM reason', got {line!r}")
+                raise SystemExit(f"{path}: expected 'YYYY-MM reason', got {line!r}")
             out[ym] = why.strip()
     return out
 
@@ -227,7 +238,7 @@ def main():
         print(f"::warning::official listing: {e}")
         official_month, official_links = None, []
         last = fallback_last(datetime.now(JST))
-    skip = skipped()
+    skip, retry = skipped(), retried()
     cache, todo = {}, []
     for y, m in months_until(last):
         ym = f"{y:04d}-{m:02d}"
@@ -243,7 +254,9 @@ def main():
         if complete(have, y, m):
             continue
         if not a.month:  # asked for by name, a month is tried whatever happened before
-            if failed(have, y, m):
+            if failed(have, y, m) and ym in retry:
+                print(f"{ym} failed before; tried again ({os.path.basename(RETRY_FILE)}: {retry[ym]})")
+            elif failed(have, y, m):
                 print(f"::warning::{ym} failed before (asset {FAILED.format(t=f'{y:04d}{m:02d}')}); left out")
                 continue
             if len(attempts(have, y, m)) >= MAX_ATTEMPTS:

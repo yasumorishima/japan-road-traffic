@@ -295,6 +295,33 @@ def test_lzh_region():
             assert "hyogo" in regs, regs
 
 
+def test_nested_region_zip():
+    """A regional zip whose only file is the same regional zip one folder down (2023-06 Akita) is read through,
+    by the converter and by the independent check; anything else wrapped that way still stops the month."""
+    tiny()
+    with tempfile.TemporaryDirectory() as tmp:
+        rows = base_rows(H10, "3009", F_NEW, year=2023, month=6, points=(1, 2, 3))
+        inner = io.BytesIO()
+        region_zip(inner, [("a.csv", csv_bytes(H10, rows))])
+        p = os.path.join(tmp, "typeB_akita_2023_06.zip")
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("typeB_akita_2023_06/", b"")
+            z.writestr("typeB_akita_2023_06/typeB_akita_2023_06.zip", inner.getvalue())
+        q = os.path.join(tmp, "typeB_toyama_2023_06.zip")
+        region_zip(q, [("b.csv", csv_bytes(H10, base_rows(H10, "3017", F_NEW, year=2023, month=6)))])
+        man, out = run(tmp, "2023-06", [p, q], check_gates=False)
+        assert man["regions"]["akita"]["rows_out"] == 108 and man["regions"]["akita"]["members"] == ["a.csv"], man
+        regs = verify_all("2023-06", [p, q], out, tmp)
+        assert "akita" in regs, regs
+        # a zip of another region (or month) inside, or a second file next to it, is not unwrapped
+        for wrapped in (["typeB_akita_2023_06/typeB_aomori_2023_06.zip"],
+                        ["typeB_akita_2023_06/typeB_akita_2023_06.zip", "readme.txt"]):
+            with zipfile.ZipFile(p, "w") as z:
+                for n in wrapped:
+                    z.writestr(n, inner.getvalue())
+            raises(lambda: run(tmp, "2023-06", [p, q], check_gates=False), ValueError, "unexpected member")
+
+
 def test_lzh_refused():
     tiny()
     with tempfile.TemporaryDirectory() as tmp:
@@ -583,10 +610,11 @@ def drive(gh, argv, official=(2026, 8), fail=None, download_fail=None, listing=N
 
 def test_police_order_completeness_and_failures():
     saved = (police.collect.gh, police.official_listing, police.available, police.curl, police.convert_and_check,
-             police.SKIP_FILE)
+             police.SKIP_FILE, police.RETRY_FILE)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             police.SKIP_FILE = os.path.join(tmp, "skip.txt")
+            police.RETRY_FILE = os.path.join(tmp, "retry.txt")
             open(police.SKIP_FILE, "w").write("# comment\n2026-05 the source file is broken\n")
             rel = {"police-2026": {**full_month("202606"), **full_month("202603")}}
             rel["police-2026"]["police_hourly_202603.parquet"]["state"] = "starter"  # an unfinished upload
@@ -635,6 +663,14 @@ def test_police_order_completeness_and_failures():
                         "police_hourly", "police_points", "police_manifest"))], gh.rel["police-2026"]
             code, out, done = drive(gh, ["--month", "2026-08"])
             assert code == 0 and done == ["2026-08"] and "police_failed_202608.json" not in gh.rel["police-2026"], out
+            # a failed month listed in the retry file is taken again by the schedule
+            g3 = FakeGitHub({"police-2026": {"police_failed_202608.json": {"state": "uploaded", "id": "1", "size": 1}}})
+            code, out, done = drive(g3, ["--dry-run"])
+            assert "2026-08 failed before" in out and "next: ['2026-07'" in out, out
+            open(police.RETRY_FILE, "w").write("2026-08 the converter was fixed\n")
+            code, out, done = drive(g3, ["--dry-run"])
+            assert "2026-08 failed before; tried again" in out and "next: ['2026-08'" in out, out
+            os.remove(police.RETRY_FILE)
             # releases are made only for a month that is worked on (the listing reads all years)
             assert set(gh.rel) == {"police-2026"}, sorted(gh.rel)
             # an upload that ends with a wrong size stops the run
@@ -666,7 +702,7 @@ def test_police_order_completeness_and_failures():
             raises(police.skipped, SystemExit, "expected")
     finally:
         (police.collect.gh, police.official_listing, police.available, police.curl, police.convert_and_check,
-         police.SKIP_FILE) = saved
+         police.SKIP_FILE, police.RETRY_FILE) = saved
 
 
 def test_official_listing():
