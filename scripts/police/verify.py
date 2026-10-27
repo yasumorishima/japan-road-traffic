@@ -95,42 +95,38 @@ def pick(paths, chk, ym):
         else:
             with zipfile.ZipFile(src[1]) as z, z.open(src[2]) as f, open(dst, "wb") as out:
                 shutil.copyfileobj(f, out, 1 << 22)
-        _unwrap(dst, region, year, month)
     return sorted(chosen), sorted(f[1] for f in found)
 
 
-def _unwrap(path, region, year, month):
-    """A regional zip whose only file is the same regional archive again is replaced by that archive (once)."""
-    with open(path, "rb") as f:
-        if _kind(f.read(8)) != "zip":
-            return
-    with zipfile.ZipFile(path) as z:
-        files = [i for i in z.infolist() if not i.is_dir()]
-        if len(files) != 1:
-            return
-        m = REGION_RE.match(_name(files[0]).rsplit("/", 1)[-1])
-        if not m or (m.group(1), int(m.group(2)), int(m.group(3))) != (region, year, month):
-            return
-        with z.open(files[0]) as f, open(path + ".inner", "wb") as out:
-            shutil.copyfileobj(f, out, 1 << 22)
-    os.replace(path + ".inner", path)
-
-
-def texts(path):
-    """Yield (file id, text stream) for every CSV of a regional archive; byte-identical files only once."""
+def texts(path, year=None, month=None, seen=None):
+    """Yield (file id, text stream) for every CSV of a regional archive; byte-identical files only once. A zip
+    member that is this region's own archive of the month (2023-06 Akita) is read too, one level down."""
     with open(path, "rb") as f:
         kind = _kind(f.read(8))
     if kind == "lzh":
+        if seen is not None:
+            raise SystemExit(f"verify: an lzh inside {path}")
         proc = subprocess.Popen(["lha", "pq", os.path.abspath(path)], stdout=subprocess.PIPE,
                                 env={"PATH": "/usr/bin:/bin", "LANG": "C"}, cwd=os.path.dirname(path))
         yield "lzh", io.TextIOWrapper(proc.stdout, encoding="cp932", newline="")
         if proc.wait() != 0:
             raise SystemExit(f"verify: lha failed on {path}")
         return
-    seen = set()
+    nested, seen = seen is not None, set() if seen is None else seen
+    region = os.path.basename(path).split(".", 1)[0]
     with zipfile.ZipFile(path) as z:
-        for info in z.infolist():
-            if info.is_dir() or not info.filename.lower().endswith(".csv"):
+        for k, info in enumerate(z.infolist()):
+            if info.is_dir():
+                continue
+            m = REGION_RE.match(_name(info).rsplit("/", 1)[-1])
+            if not nested and m and (m.group(1), int(m.group(2)), int(m.group(3))) == (region, year, month):
+                inner = f"{path}.{k}.inner"
+                with z.open(info) as f, open(inner, "wb") as out:
+                    shutil.copyfileobj(f, out, 1 << 22)
+                yield from texts(inner, year, month, seen)
+                os.remove(inner)
+                continue
+            if not info.filename.lower().endswith(".csv"):
                 continue
             h = hashlib.sha256()
             with z.open(info) as f:
@@ -157,7 +153,7 @@ def recompute(path, year, month):
     """For one region: {(source, point, day, hour, minute): count or None} (conflicts dropped) and
     {(source, point): {"rows", "first", "last", attribute: Counter}} over every row at a valid time."""
     keep, points = {}, {}
-    for _, t in texts(path):
+    for _, t in texts(path, year, month):
         head = None
         for line in t:
             line = line.rstrip("\r\n")
