@@ -39,6 +39,7 @@
   - `python scripts/police/mutate_police.py` は、コードをわざと壊してテストが見抜けるかを確かめる。結果は `N planted defects, 0 not caught` でなければならない。
   - コードを書き換えると、仕込んだ欠陥の置換元が見つからず `MUTATION DID NOT APPLY` になる。新しいコードに合わせて欠陥も足すか直すこと。build-check はこれで落ちる。
 - Python パッケージのバージョンはワークフローごとに固定している。勝手に上げない。
+- 固定していない間接依存が新版で壊れることがある。kaggle 2.2.4 は `six` を宣言せずに使うため、`python-dateutil` を 2.9.0.post0 に固定している（4.0.0 で `six` が依存から外れた）。
 
 ## 規約
 
@@ -59,3 +60,6 @@
   - #17 では「中に ZIP が1つだけ」と思い込んで外した。#18 で、自分と同じ名前の ZIP の CSV も1段だけ読むようにし、同じ内容の CSV は1回だけ数えるようにした。
   - #44 で取り込めた（103万行、161地点）。#20 で retry リストから外した。
   - 教訓：推測で直さず、まず実物の中身を見る。
+- **2026-11-01 Kaggle 公開が kaggle CLI の起動で失敗（publish #92）**
+  - 原因：同日 07:02 UTC に `python-dateutil` 4.0.0 が出て、依存から `six` が消えた。kaggle 2.2.4 は `six` を宣言しないまま import しているため、`ModuleNotFoundError: No module named 'six'` で落ちた（「dataset does not exist」の表示は、status 取得が失敗したことによる副作用）。
+  - 対応：#22 で `python-dateutil==2.9.0.post0` を固定した。公開の失敗では `published_assets.txt` が更新されないので、次の定期実行で自動的に公開される。

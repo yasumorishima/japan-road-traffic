@@ -56,7 +56,7 @@ jobs:
 
       - name: Install and test
         run: |
-          pip install --quiet pandas==3.0.6 pyarrow==26.0.0 numpy==2.5.4 kaggle==2.2.4
+          pip install --quiet pandas==3.0.6 pyarrow==26.0.0 numpy==2.5.4 kaggle==2.2.4 python-dateutil==2.9.0.post0
           python scripts/test_fetch.py
           python scripts/test_collect.py
           python scripts/test_fixtures.py
