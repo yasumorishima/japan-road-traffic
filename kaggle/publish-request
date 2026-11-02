@@ -2,3 +2,4 @@
 # Write the reason on the next line.
 2026-10-27 first publish after the status-parsing fix (#15)
 2026-10-28 retry: version 28 (run #76) uploaded but Kaggle marked it Failed without a reason
+2026-11-02 publish after #22 (python-dateutil pin); the 01:47 UTC collect was skipped by GitHub
