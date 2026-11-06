@@ -63,3 +63,6 @@
 - **2026-11-01 Kaggle 公開が kaggle CLI の起動で失敗（publish #92）**
   - 原因：同日 07:02 UTC に `python-dateutil` 4.0.0 が出て、依存から `six` が消えた。kaggle 2.2.4 は `six` を宣言しないまま import しているため、`ModuleNotFoundError: No module named 'six'` で落ちた（「dataset does not exist」の表示は、status 取得が失敗したことによる副作用）。
   - 対応：#22 で `python-dateutil==2.9.0.post0` を固定した。続く 01:47 UTC の collect が GitHub に飛ばされたため、#23 で publish-request を push して公開した。
+- **2026-11-06 Kaggle 公開が GitHub のアセット取得で失敗（publish #108）**
+  - 原因：`gh release download` の途中で、GitHub がアセット1件（`raw-202607/loop_1h_road3_20260708.csv.gz`）に HTTP 500 を返した。ファイル自体は壊れておらず、直後に取得すると 200 だった。GitHub 側の一時的なエラー。
+  - 対応：#24 で、リリースのダウンロードを1タグにつき最大3回（30秒おき、取得済みのファイルは飛ばす）再試行するようにした。公開が失敗しても `data/published_assets.txt` は更新されないので、次の collect 後の publish が自動でやり直す。

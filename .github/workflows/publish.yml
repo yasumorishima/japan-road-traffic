@@ -85,15 +85,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # GitHub sometimes answers a single asset download with HTTP 500; retry, keeping the files already fetched
+          fetch() { for i in 1 2 3; do gh release download "$@" --skip-existing && return 0; echo "retry $i: $*"; sleep 30; done; return 1; }
           for tag in $(cut -d' ' -f1 assets.txt | sort -u); do
-            gh release download "$tag" --dir "dl/$tag" --pattern '*.csv.gz'
+            fetch "$tag" --dir "dl/$tag" --pattern '*.csv.gz'
           done
           test "$(find dl -name '*.csv.gz' | wc -l)" -eq "$(wc -l < assets.txt)"
           # the AMeDAS archive (weather columns and files); a failed download stops the build, so a version is never
           # published with the weather silently missing
           mkdir -p _weather
           for tag in $(gh release list --limit 200 --json tagName -q ".[].tagName" | grep "^amedas-"); do
-            gh release download "$tag" --dir _weather --pattern "*.csv.gz" --skip-existing
+            fetch "$tag" --dir _weather --pattern "*.csv.gz"
           done
           python scripts/build_counters.py --from-files dl --no-api
           python scripts/build_kaggle.py dl _build --counters data/counters.csv --weather _weather
