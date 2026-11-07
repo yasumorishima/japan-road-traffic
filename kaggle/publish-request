@@ -3,3 +3,4 @@
 2026-10-27 first publish after the status-parsing fix (#15)
 2026-10-28 retry: version 28 (run #76) uploaded but Kaggle marked it Failed without a reason
 2026-11-02 publish after #22 (python-dateutil pin); the 01:47 UTC collect was skipped by GitHub
+2026-11-07 publish after #24 (download retry); #108 failed on a GitHub HTTP 500 and the 01:47 UTC collect had not started by 04:00
