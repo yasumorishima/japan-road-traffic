@@ -42,8 +42,8 @@ M = [
     (C, "lzh level-2 file name ignored", "                    if ext[0] == 1:\n                        name = ext[1:-2]\n                    elif ext[0] == 2:\n                        dirname = ext[1:-2]\n                    p += nxt",
      "                    if False:\n                        name = ext[1:-2]\n                    elif ext[0] == 2:\n                        dirname = ext[1:-2]\n                    p += nxt"),
     # convert: gates
-    (C, "share gates far too loose", "if s[k] / rows > lim:", "if s[k] / rows > lim * 100:"),
-    (C, "share gate at its level", "if s[k] / rows > lim:", "if s[k] / rows >= lim:"),
+    (C, "share gates far too loose", "if s[k] / rows > lim and", "if s[k] / rows > lim * 100 and"),
+    (C, "share gate at its level", "if s[k] / rows > lim and", "if s[k] / rows >= lim and"),
     (C, "share diluted by point 0", 'rows = max(s["rows_in"] - s["point_zero_rows"], 1)', 'rows = max(s["rows_in"], 1)'),
     (C, "empty region passes", 'if s["rows_out"] == 0:', "if False:"),
     (C, "every region expected early", "expected = REGIONS - EARLY_MISSING.get((year, month), frozenset())",
@@ -123,6 +123,20 @@ M = [
     (P, "manifest not last", '"police_points_{t}.csv.gz", "police_manifest_{t}.json")',
      '"police_manifest_{t}.json", "police_points_{t}.csv.gz")'),
     (P, "malformed skip line accepted", 'if not re.fullmatch(r"\\d{4}-\\d{2}", ym) or not why.strip():', "if False:"),
+    # a file without header (2017-12 Mie) and a gate allowance (2017-10 Osaka)
+    (C, "header supplied to every file", "given = [NO_HEADER.get((region, year, month, m[0])) for m in members]",
+     "given = [NO_HEADER.get((region, year, month, m[0])) or next(iter(NO_HEADER.values())) for m in members]"),
+    (C, "first row of a file without header dropped", "names, skip = canonical_header(given), 0",
+     "names, skip = canonical_header(given), 1"),
+    (C, "first line of a file without header unchecked", 'if len(cols) != len(given.split(",")) or not re.fullmatch(',
+     'if False and re.fullmatch('),
+    (C, "gate allowance in every month", "GATE_ALLOW.get((r, year, month, k), -1)", "GATE_ALLOW.get((r, 2017, 10, k), -1)"),
+    (C, "gate allowance without a limit", "and s[k] > GATE_ALLOW.get((r, year, month, k), -1)",
+     "and (r, year, month, k) not in GATE_ALLOW"),
+    (V, "verify supplies no header", "                    cols = supplied\n", ""),
+    (V, "verify drops the first row of a file without header", "                if supplied is None:\n                    continue",
+     "                continue"),
+    (V, "verify does not check a file without header", 'if "時刻" in cols or len(cols) != len(supplied):', "if False:"),
 ]
 
 

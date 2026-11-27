@@ -136,7 +136,7 @@ def texts(path, year=None, month=None, seen=None):
                 continue
             seen.add(h.digest())
             with z.open(info) as f:
-                yield info.filename, io.TextIOWrapper(f, encoding="cp932", newline="")
+                yield _name(info), io.TextIOWrapper(f, encoding="cp932", newline="")
 
 
 ATTR_COLS = {  # canonical name -> test on the header text
@@ -149,20 +149,33 @@ ATTR_COLS = {  # canonical name -> test on the header text
 }
 
 
+# CSVs shipped without a header line: (region, year, month, file name) -> their columns (2017-12 Mie; written out
+# here apart from the converter's table)
+HEADERLESS = {("mie", 2017, 12, "三重県警_201712.csv"): ["時刻", "情報源コード", "計測地点番号", "計測地点名称",
+              "2次メッシュコード", "リンク区分", "リンク番号", "断面交通量", "リンク終端からの距離(10m)"]}
+
+
 def recompute(path, year, month):
     """For one region: {(source, point, day, hour, minute): count or None} (conflicts dropped) and
     {(source, point): {"rows", "first", "last", attribute: Counter}} over every row at a valid time."""
     keep, points = {}, {}
-    for _, t in texts(path, year, month):
+    region = os.path.basename(path).split(".", 1)[0]
+    for name, t in texts(path, year, month):
         head = None
         for line in t:
             line = line.rstrip("\r\n")
             if head is None:
                 cols = [h.strip() for h in line.split(",")]
+                supplied = HEADERLESS.get((region, year, month, name.rsplit("/", 1)[-1]))
+                if supplied is not None:
+                    if "時刻" in cols or len(cols) != len(supplied):
+                        raise SystemExit(f"verify: {name} was to have no header line: {line!r}")
+                    cols = supplied
                 ix = [cols.index(n) for n in ("情報源コード", "計測地点番号", "時刻", "断面交通量")]
                 ax = {a: next((i for i, h in enumerate(cols) if test(h)), None) for a, test in ATTR_COLS.items()}
                 head = cols
-                continue
+                if supplied is None:
+                    continue
             if not line.strip():
                 continue
             c = line.split(",")

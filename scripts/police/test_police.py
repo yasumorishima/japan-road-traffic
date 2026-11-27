@@ -487,6 +487,60 @@ def test_gates():
     assert convert.gate_failures(2017, 7, {**regions, "atlantis": dict(st)}, tot) == ["unknown regions ['atlantis']"]
 
 
+def test_file_without_header():
+    """2017-12 Mie: the CSV starts with a data row. Only that file of that region and month is read with the
+    header it should have had, by the converter and by the check; anywhere else a missing header still stops."""
+    tiny()
+    with tempfile.TemporaryDirectory() as tmp:
+        rows = base_rows(H9, "301C", F_OLD, year=2017, month=12, points=(100, 10001))
+        bare = ("\r\n".join(rows) + "\r\n").encode("cp932")
+        p = os.path.join(tmp, "typeB_mie_2017_12.zip")
+        q = os.path.join(tmp, "typeB_toyama_2017_12.zip")
+        region_zip(q, [("b.csv", csv_bytes(H9, base_rows(H9, "3017", F_OLD, year=2017, month=12)))])
+        region_zip(p, [("三重県警_201712.csv", bare)])
+        man, out = run(tmp, "2017-12", [p, q], check_gates=False)
+        st = man["regions"]["mie"]
+        assert st["rows_in"] == st["rows_out"] == 72 and st["header_supplied"] == ["三重県警_201712.csv"], st
+        assert "header_supplied" not in man["regions"]["toyama"]
+        assert hourly(out, "201712").filter(pl.col("source") == "301C").height == 6
+        assert "mie" in verify_all("2017-12", [p, q], out, tmp)
+        # another name, region or month: the first row is read as a header and stops the month
+        for name, path, ym in (("三重県警_201711.csv", p, "2017-12"), ("三重県警_201712.csv", q, "2017-12")):
+            region_zip(path, [(name, bare)])
+            raises(lambda: run(tmp, ym, [path], check_gates=False), ValueError, "unknown column")
+        p11 = os.path.join(tmp, "typeB_mie_2017_11.zip")
+        region_zip(p11, [("三重県警_201712.csv", bare)])
+        raises(lambda: run(tmp, "2017-11", [p11], check_gates=False), ValueError, "unknown column")
+        # the file of the list arriving with a header (or with other columns) stops both sides
+        for data in (csv_bytes(H9, rows), ("\r\n".join(r + ",1" for r in rows) + "\r\n").encode("cp932")):
+            region_zip(p, [("三重県警_201712.csv", data)])
+            region_zip(q, [("b.csv", csv_bytes(H9, base_rows(H9, "3017", F_OLD, year=2017, month=12)))])
+            raises(lambda: run(tmp, "2017-12", [p, q], check_gates=False), ValueError, "expected a data row")
+            chk = os.path.join(tmp, "chk2")
+            os.makedirs(chk, exist_ok=True)
+            shutil.copyfile(p, os.path.join(chk, "mie.arc"))
+            raises(lambda: verify.recompute(os.path.join(chk, "mie.arc"), 2017, 12), SystemExit, "no header line")
+
+
+def test_gate_allowance():
+    """2017-10 Osaka: one day of doubled rows with different counts. Its conflict count may reach the number
+    looked at, in that region and month only."""
+    convert.MIN_POINTS, convert.REGIONS = REAL
+    st = {"rows_in": 26483532, "point_zero_rows": 10633531, "outside_rows": 0, "conflict_rows": 928788,
+          "bad_value_rows": 0, "point_not_integer": 0, "rows_out": 14897305}
+    ok = {"rows_in": 100000, "point_zero_rows": 0, "outside_rows": 0, "conflict_rows": 0, "bad_value_rows": 0,
+          "point_not_integer": 0, "rows_out": 100000}
+    regions = {r: dict(ok) for r in convert.REGIONS}
+    tot = {"points": 28871}
+    assert convert.gate_failures(2017, 10, {**regions, "osaka": st}, tot) == []
+    more = {**st, "conflict_rows": 928789}
+    assert convert.gate_failures(2017, 10, {**regions, "osaka": more}, tot) == ["osaka conflict_rows 928789"]
+    assert convert.gate_failures(2017, 11, {**regions, "osaka": st}, tot) == ["osaka conflict_rows 928788"]
+    assert convert.gate_failures(2017, 10, {**regions, "hyogo": st}, tot) == ["hyogo conflict_rows 928788"]
+    assert convert.gate_failures(2017, 10, {**regions, "osaka": {**st, "outside_rows": 928788}}, tot) == [
+        "osaka outside_rows 928788"]
+
+
 def test_verify_catches_changes():
     tiny()
     with tempfile.TemporaryDirectory() as tmp:

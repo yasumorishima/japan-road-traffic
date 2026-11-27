@@ -1,2 +1,4 @@
 # Months the police collector tries again although they failed before (their police_failed asset is ignored; the
 # limit of three started attempts still holds): "YYYY-MM reason". Remove a line once its month is in the release.
+2017-12 the Mie CSV has no header line (police #112); its header is now supplied by name
+2017-10 Osaka doubles one day with different counts (police #114); that conflict count is now allowed for this month
