@@ -35,6 +35,10 @@ REQUIRED = ["time", "source", "point", "name", "mesh2", "link_kind", "vehicles"]
 OPTIONAL = ["link_no", "link_dist_10m", "link_version"]
 ATTRS = ["name", "mesh2", "link_kind", "link_no", "link_dist_10m", "link_version"]
 TIME_FORMATS = ["%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S"]
+# CSVs shipped without a header line, by (region, year, month, member name): the header the file should have had.
+# 2017-12 Mie starts with a data row; its columns are those of the 2017-11 Mie header (nine columns).
+NO_HEADER = {("mie", 2017, 12, "三重県警_201712.csv"):
+             "時刻,情報源コード,計測地点番号,計測地点名称,2次メッシュコード,リンク区分,リンク番号,断面交通量,リンク終端からの距離(10m)"}
 
 # The regions of the official page (2026). Every monthly archive from 2017-08 on holds exactly these; the seven
 # months before hold 38 to 42 of them (12 or 13 missing in 2017-01..04, 9 in 2017-05..07).
@@ -55,6 +59,12 @@ MAX_CONFLICT_SHARE = 0.001     # (source, point, time) seen twice with different
 MAX_BAD_VALUE_SHARE = 0.01     # counts that are not an integer 0..32767
 MAX_BAD_POINT_SHARE = 0.001    # point numbers that are not integers
 MIN_POINTS = 5000              # in the whole month
+# a higher limit for one count of one region in one month, after its rows were looked at: (region, year, month,
+# count) -> the most rows allowed. 2017-10 Osaka holds two different counts for almost every point and 5-minute
+# time from 10-12 11:00 to 10-13 10:50 (464,394 keys, two rows each; one of the two repeats a neighbouring time's
+# count, so neither can be kept). Those times are dropped and counted as everywhere else; the rest of the month is
+# whole.
+GATE_ALLOW = {("osaka", 2017, 10, "conflict_rows"): 928788}
 
 LZH_METHOD = re.compile(rb"-(lh[0-7d]|lz[s45])-$")
 
@@ -272,13 +282,24 @@ def parse_time(col):
     return e
 
 
-def scan_region(csv_paths):
-    """All rows of one region as a lazy frame with canonical columns (strings, plus time_jst)."""
+def scan_region(csv_paths, headers=None):
+    """All rows of one region as a lazy frame with canonical columns (strings, plus time_jst). headers[i], when
+    given, is the header of a file shipped without one (NO_HEADER): its first line must then be a data row of as
+    many fields."""
     frames = []
-    for p in csv_paths:
+    for i, p in enumerate(csv_paths):
+        given = (headers or [None] * len(csv_paths))[i]
         with open(p, encoding="utf-8") as f:
-            names = canonical_header(f.readline())
-        lf = pl.scan_csv(p, has_header=False, skip_rows=1, new_columns=names, infer_schema=False,
+            first = f.readline()
+        if given is None:
+            names, skip = canonical_header(first), 1
+        else:
+            cols = first.rstrip("\r\n").split(",")
+            if len(cols) != len(given.split(",")) or not re.fullmatch(r"\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}(:\d{2})?",
+                                                                    cols[0].strip()):
+                raise ValueError(f"expected a data row as the first line of a file without header: {first!r}")
+            names, skip = canonical_header(given), 0
+        lf = pl.scan_csv(p, has_header=False, skip_rows=skip, new_columns=names, infer_schema=False,
                          truncate_ragged_lines=False, quote_char=None)
         lf = lf.with_columns(pl.col(c).str.strip_chars() for c in names)
         # an empty source code is read as missing; keep it as "" so it joins and matches like any other code
@@ -450,7 +471,10 @@ def convert_month(ym, inputs, outdir, workdir, sources=None, check_gates=True):
             os.remove(rz)
         st["members"] = [m[0] for m in members]
         st["identical_members_dropped"] = dropped
-        five, points = convert_region(scan_region([to_utf8(m[1]) for m in members]), year, month, st)
+        given = [NO_HEADER.get((region, year, month, m[0])) for m in members]
+        if any(given):
+            st["header_supplied"] = [m[0] for m, g in zip(members, given) if g]
+        five, points = convert_region(scan_region([to_utf8(m[1]) for m in members], given), year, month, st)
         hourly = hourly_of(five)
         t5, th = five.to_arrow(), hourly.to_arrow()
         if w5 is None:
@@ -508,7 +532,7 @@ def gate_failures(year, month, regions, tot):
         rows = max(s["rows_in"] - s["point_zero_rows"], 1)
         for k, lim in (("point_not_integer", MAX_BAD_POINT_SHARE), ("outside_rows", MAX_OUTSIDE_SHARE),
                        ("conflict_rows", MAX_CONFLICT_SHARE), ("bad_value_rows", MAX_BAD_VALUE_SHARE)):
-            if s[k] / rows > lim:
+            if s[k] / rows > lim and s[k] > GATE_ALLOW.get((r, year, month, k), -1):
                 f.append(f"{r} {k} {s[k]}")
         if s["rows_out"] == 0:
             f.append(f"{r} no rows")
