@@ -86,5 +86,98 @@ Anthropic の記事「Building strong safety evaluations」（2026-11-13）か�
   - 2017-10：大阪の `大阪府警_20171001-15.csv` で、10-12 11:00〜10-13 10:50 のほぼ全地点・全時刻が2行ずつあり、数が違った（464,394 キー、928,788 行、門の 0.1% を超えて約 6%）。2行のうち1行は隣の時刻の値の繰り返しで、どちらが正しいか決められない。
   - 調べ方：作業ブランチに一時ワークフローを置き、HTTP Range で月の ZIP から該当地域の ZIP だけを取り出して中身を見た。調べ終わって消した。
   - 対応：#27 で、三重のこのファイルだけ名前を指定して見出しを補う（`NO_HEADER`、検算側も別に `HEADERLESS` を持つ）。1行目が同じ列数のデータ行でなければ止まる。大阪はこの地域・月の conflict_rows だけ 928,788 行まで認める（`GATE_ALLOW`）。食い違う時刻は今までどおり落として数える。`data/police_retry.txt` に2か月を入れた。取り込めたら行を消す。
+  - 2017-12 は police #115 で取り込めた（3.19 億行、28,249 地点、三重は `header_supplied`）。retry リストから外した。2017-10 は次の実行で試す。
   - 教訓：門で止まったら、まず実物を見て、入力の誤りか読み方の誤りかを分ける。入力の誤りと分かったら、名前を指定した狭い例外にし、門そのものは緩めない。
   - 調査用スクリプトを `inspect.py` と名付けたら標準ライブラリの `inspect` とぶつかり、numpy の import で落ちた。一時スクリプトに標準モジュールと同じ名前を付けない。
+
+## Progress log
+
+### 2026-11-28 Rust を足す価値がある場所を測った（結論：今は入れない）
+
+参考：Anthropic「Migrating our API to Rust」（2026-11-25）。そこから借りたのは、今の実装を正解とし、段ごとに出力を比べ、最初にずれた段と、ずれの形だけを記録するやり方。
+
+**1. 直近 10 回の成功 run（中央値／最大、秒）と、時間の中身**
+
+| ワークフロー・手順 | 中央値 | 最大 | 中身 |
+|---|---|---|---|
+| police：Fetch, convert, check and upload | 1168 | 1391 | ダウンロード 390〜595 s（compusophia）＋変換 367〜729 s＋検算 38〜122 s＋アップロード 14〜21 s。`/usr/bin/time` で CPU は 1.1〜1.5 コア分（4 コア中） |
+| police：Tests (offline) | 19 | 29 | |
+| collect：Fetch missing days | 300 | 639 | 交通量 API の待ち。1 要求あたり wall 3〜4 s に対し CPU 0.01〜0.03 s（`PAUSE` 2 s を含む） |
+| weather：Fetch missing days | 2 | 31 | ほぼ空振り。最長 15 分の run は、ランナー割り当ての待ちが 14 分で、処理は 7 s |
+| publish：Download + build | 0（空振り）| 290 | 下の build_kaggle がほとんど |
+| publish：Publish a Kaggle version | 0 | 134 | Kaggle へのアップロード |
+| build-check：Full build | 293 | 331 | リリースの取得と build_kaggle、検算 |
+| build-check：police tests + planted defects | 134 | 143 | テストの繰り返し |
+
+参考の最長（直近 30 回）：police 146 分の run（#94, 2019-06）は、ダウンロードに約 2 時間かかっていた（CPU 24%）。これは CPU ではなく通信が原因。
+
+**2. Python の CPU 計算を段ごとに測った（手元の 4 コアの機械。CI と同じ固定バージョン）**
+
+build_kaggle.py。リリース 827 ファイル（181 MB）から 36 ファイルを作るのに 190 s かかる。
+- read（CSV.gz → 型付きの表）：105 s
+- derive：18 s
+- baseline（直前 4 日の中央値）：18 s
+- add_weather：15 s
+- concat・sort・重複チェック：12 s
+- to_parquet：8 s
+- load_weather：6.5 s
+- daily_summary：5.4 s
+
+このほか build_counters は 35 s、verify_enrich は 36 s、verify_daily は 7 s かかる。read が遅い理由：
+- `set(df[c])` が Arrow の文字列列を 1 セルずつ Python オブジェクトにする（7,800 万回、38 s）。
+- 文字列への `pd.to_numeric`（24 s）。
+- `read_csv(dtype=str)`（26 s）。
+
+police convert.py。公開済みの 2017-12 出力から元の形の CSV（CP932、地域 ZIP の入った月 ZIP）を作り直した。神奈川・東京・大阪の 5,530 万行。
+- 合計 110 s（0.5 M 行/s で、CI の 0.46〜0.85 M 行/s と同じくらい）
+- convert_region：80 s
+- to_utf8（iconv）：13 s
+- ZIP 展開：8 s
+- Parquet 書き出し：5 s
+
+convert_region の中身：polars の遅延フレームが、地域ごとに同じ CSV を 12 回、最初から読み直している（統計 1 回、属性 6 回、コード 1 回、本体 1 回）。CSV を 1 回読むのに 2.8 s かかる。
+
+**3〜4. 候補ごとの比較（出力はすべて今の Python 版と比べた）**
+
+| 候補 | 今 | Python のまま縮めた実測 | Rust 試作（PyO3）の実測 | 判定 |
+|---|---|---|---|---|
+| build_kaggle の read（827 ファイル） | 104 s | 38.5 s（`set(...unique())`、pyarrow.csv で一括読み、数字列だけ pyarrow で int に変換し、それ以外は今のコードへ戻す） | 29.0 s（flate2+csv で 1 回読み、整数と文字列のバッファを返す） | **入れない**。Rust で上乗せできるのは 9.5 s だけ |
+| build_kaggle 全体 | 190 s | 118 s | 112 s | **入れない**。差は 6 s で、publish は 1 日 1〜3 回 |
+| police の 1 回分の統計パス（神奈川 2,050 万行） | 3.5 s（polars、CSV） | 0.74 s（一度 IPC に書いてから読む） | 5.6 s（1 スレッドの素朴な実装。polars より遅い） | **入れない**。polars はもともと Rust なので、無駄は読み直しの回数にある |
+| police convert_region（神奈川） | 29.4 s | 13.6 s（CSV を一度だけ `sink_ipc` してから同じ convert_region を実行。five・points・stats が完全に一致） | 試作なし（下の理由） | **入れない** |
+| collect／weather の取得、police のダウンロード、Kaggle への公開 | 300〜1200 s | 対象外 | 対象外 | 通信が主なので Rust の対象にしない |
+
+一致の確かめ方：
+- read は 827 ファイルすべてで、列・dtype・値が一致した（`DataFrame.equals`）。
+- Python 版と Rust 版の両方で build を最後まで走らせ、36 個の出力（Parquet・CSV）がバイト単位で同じだった。
+- 比較スクリプトは、ずれたときに最初のファイル・列・行を出す。わざと 1 セル変えた出力で `hourly_2026-10_11-20.parquet: column vehicles row 12345: 1507 vs 1508` と出ることを確かめた。
+
+police の Rust 試作は、合成データに不正な行がなく、数が一致してもあまり意味がない。
+
+**判断の理由**
+- CPU が支配的なのは build_kaggle（publish・build-check）と police の変換だけだった。どちらも主な無駄は Python 側の書き方で、pandas/pyarrow/polars のまとめ処理で縮む。
+  - build_kaggle は、1 セルずつの処理と、文字列の数値化。
+  - police は、同じ CSV を 12 回読み直していること。
+- その上に Rust を足しても、伸びは小さい。
+  - build_kaggle で 6 s。
+  - police では polars のほうが速い。
+- 一方で Rust を足すと、次の負担が増える。
+  - 2 つ目の実装と、その一致の確かめ。
+  - CI での Rust のビルド（試作は依存のキャッシュありで 12 s）。
+  - 仕込んだ欠陥の試験を 2 つの実装に保つこと。
+- 通信の待ち（police のダウンロード、交通量 API、Kaggle）が wall の半分以上を占める。
+- 時間切れの心配はない。いずれも上限よりずっと短い。
+  - collect は最長 11 分で、上限 300 分（元データの保持は 5 分値で 28 日、1 時間値で 88 日）。
+  - weather は最長 15 分で、上限 60 分（気象庁の保持は約 9 日、1 日 3 回取得）。
+  - police は最長 146 分で、上限 300 分。
+- 取得の別案（並列化など）は、今は要らない。police のダウンロードが 2 時間を超えることが続くなら、そのときに考える。
+
+**次にやるなら（Rust ではなく Python のまま。今回は main に入れていない）**
+- build_kaggle の read を上の形に直す：190 s → 約 118 s。publish と build-check が 1 回あたり約 70 s 短くなる。直すときは、今の read と全ファイルで `equals` を取り、出力をバイト比較する。数字列以外の値は、今のコードへ戻す。
+- police の convert_region の前で、地域の CSV を一度だけ型付きの IPC に書く：変換 370〜730 s → 推定 170〜330 s。
+  - 一時ファイルが要る。神奈川で数 GB になるので、ディスクを確かめる。
+  - 変換と検算を両方そのまま通し、仕込んだ欠陥も足す。
+- 測り直す手順：
+  - 手順の時間は `actions/runs/{id}/jobs` の steps から取る。
+  - police の内訳はログの `downloaded … in N s`、`region …`、`totals`、`recomputed independently`、`uploaded to` の時刻と、`/usr/bin/time` の CPU 時間から取る。
+  - build_kaggle は、リリースを取ってきて段ごとにタイマーを付けて実行する。
